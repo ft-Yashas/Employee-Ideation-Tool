@@ -1,0 +1,112 @@
+import { useState, useRef } from 'react';
+import { useLang } from '../context/LangContext';
+import { useToast } from '../context/ToastContext';
+import { ideasApi, usersApi } from '../services/api';
+
+export default function AssignReviewersModal({ ideaId, ideaCode, onClose }) {
+  const { t }         = useLang();
+  const { showToast } = useToast();
+  const [query,     setQuery]     = useState('');
+  const [results,   setResults]   = useState([]);
+  const [selected,  setSelected]  = useState([]);
+  const [threshold, setThreshold] = useState(100);
+  const [loading,   setLoading]   = useState(false);
+  const timerRef = useRef(null);
+
+  async function handleSearch(q) {
+    setQuery(q);
+    clearTimeout(timerRef.current);
+    if (q.length < 2) { setResults([]); return; }
+    timerRef.current = setTimeout(async () => {
+      try {
+        const res = await usersApi.list({ q });
+        setResults((res.data.users||[]).filter(u => !selected.some(s=>s.id===u.id)));
+      } catch {}
+    }, 300);
+  }
+
+  function addReviewer(u) {
+    setSelected(prev => [...prev, u]);
+    setResults([]);
+    setQuery('');
+  }
+
+  function removeReviewer(id) {
+    setSelected(prev => prev.filter(u=>u.id!==id));
+  }
+
+  async function handleSubmit() {
+    if (!selected.length) { showToast('Select at least one reviewer.', 'warning'); return; }
+    setLoading(true);
+    try {
+      const res = await ideasApi.assignReviewers({
+        idea_id: ideaId,
+        reviewer_ids: selected.map(u=>u.id),
+        approval_threshold: threshold,
+      });
+      if (res.data.success) {
+        showToast('Reviewers assigned. Idea routed to committee.', 'success');
+        onClose();
+      } else showToast(res.data.error || 'Failed to assign reviewers.', 'danger');
+    } catch { showToast('Server error.', 'danger'); }
+    setLoading(false);
+  }
+
+  return (
+    <div className="modal-overlay open" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth:480 }}>
+        <div className="modal-header">
+          <span>{t('review.route_committee')} — #{ideaCode}</span>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-group">
+            <label>Search Reviewers</label>
+            <div className="pos-rel">
+              <input className="form-control" value={query} onChange={e => handleSearch(e.target.value)}
+                placeholder="Search by name or employee ID…" />
+              {results.length > 0 && (
+                <div className="user-search-results" style={{ display:'block' }}>
+                  {results.map(u => (
+                    <div key={u.id} className="uitem" onClick={() => addReviewer(u)}>
+                      {u.name} · {u.employee_id} · {u.department||'–'}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {selected.length > 0 && (
+            <div className="form-group">
+              <label>Selected Reviewers ({selected.length})</label>
+              <div style={{ display:'flex',flexWrap:'wrap',gap:6 }}>
+                {selected.map(u => (
+                  <span key={u.id} style={{ display:'flex',alignItems:'center',gap:4,background:'var(--chip-bg)',border:'1px solid var(--border)',borderRadius:'var(--r-full)',padding:'3px 10px',fontSize:12 }}>
+                    {u.name}
+                    <button onClick={() => removeReviewer(u.id)} style={{ background:'none',border:'none',cursor:'pointer',color:'#ef4444',fontSize:14,lineHeight:1,padding:0 }}>×</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label>Approval Threshold (%)</label>
+            <input className="form-control" type="number" min="1" max="100"
+              value={threshold} onChange={e => setThreshold(parseInt(e.target.value)||100)} style={{ maxWidth:120 }} />
+            <div style={{ fontSize:11,color:'var(--subtle)',marginTop:3 }}>
+              % of reviewers who must approve. 100% = all must approve.
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={loading || !selected.length} onClick={handleSubmit}>
+            {loading ? t('msg.loading') : 'Assign Reviewers'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

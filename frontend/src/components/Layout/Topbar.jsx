@@ -1,0 +1,176 @@
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import { useLang } from '../../context/LangContext';
+import { useNotif } from '../../context/NotifContext';
+import { useToast } from '../../context/ToastContext';
+import { SUPPORTED_LANGS, LANG_LABELS, LANG_NAMES } from '../../i18n/translations';
+import { formatRole, timeAgo } from '../../utils/helpers';
+
+const PAGE_TITLES = {
+  '/dashboard':    'nav.dashboard',
+  '/my-ideas':     'nav.my_ideas',
+  '/submit':       'form.submit_idea',
+  '/review':       'nav.review',
+  '/all-ideas':    'nav.all_ideas',
+  '/board':        'nav.all_ideas',
+  '/challenges':   'nav.submit',
+  '/audit':        'nav.audit',
+  '/leaderboard':  'nav.leaderboard',
+  '/analytics':    'nav.analytics',
+  '/admin':        'nav.admin',
+  '/super-admin':  'nav.super_admin',
+  '/profile':      'nav.profile',
+  '/platform':     'pa.overview',
+};
+
+export default function Topbar({ onToggleSidebar }) {
+  const { user, logout }                     = useAuth();
+  const { t, lang, setLang }                = useLang();
+  const { notifs, unreadCount, markAllRead } = useNotif();
+  const { showToast }                        = useToast();
+  const navigate  = useNavigate();
+  const location  = useLocation();
+
+  const [isDark, setIsDark]         = useState(document.documentElement.getAttribute('data-theme') === 'dark');
+  const [showNotif, setShowNotif]   = useState(false);
+  const [showLang, setShowLang]     = useState(false);
+  const langMenuRef                  = useRef(null);
+  const notifPanelRef                = useRef(null);
+
+  const pageTitle = PAGE_TITLES[location.pathname] ? t(PAGE_TITLES[location.pathname]) : location.pathname.replace(/\//,'').replace(/-/g,' ');
+
+  function toggleDark() {
+    const next = isDark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('ifqm-theme', next);
+    setIsDark(!isDark);
+  }
+
+  async function doLogout() {
+    await logout();
+    navigate('/');
+  }
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    function handler(e) {
+      if (showNotif && notifPanelRef.current && !notifPanelRef.current.contains(e.target)) {
+        const bell = document.getElementById('notif-bell-btn');
+        if (!bell?.contains(e.target)) setShowNotif(false);
+      }
+      if (showLang && langMenuRef.current && !langMenuRef.current.contains(e.target)) {
+        const btn = document.getElementById('lang-btn');
+        if (!btn?.contains(e.target)) setShowLang(false);
+      }
+    }
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [showNotif, showLang]);
+
+  // Position lang menu
+  function handleLangToggle(e) {
+    e.stopPropagation();
+    setShowLang(v => !v);
+    if (!showLang && langMenuRef.current) {
+      const btn = document.getElementById('lang-btn');
+      if (btn) {
+        const r = btn.getBoundingClientRect();
+        langMenuRef.current.style.top  = (r.bottom + 6) + 'px';
+        langMenuRef.current.style.right = (window.innerWidth - r.right) + 'px';
+      }
+    }
+  }
+
+  return (
+    <div id="topbar">
+      <div className="topbar-left">
+        <button
+          style={{ background:'none',border:'none',cursor:'pointer',fontSize:20,color:'var(--text-muted)',padding:'4px 6px',borderRadius:6,transition:'background .15s',lineHeight:1 }}
+          onClick={onToggleSidebar}
+          onMouseOver={e => e.target.style.background='var(--bar-track)'}
+          onMouseOut={e => e.target.style.background='none'}
+        >&#9776;</button>
+        <span className="page-title">{pageTitle}</span>
+      </div>
+
+      <div className="topbar-right">
+        {/* Dark mode toggle */}
+        <div className="dm-toggle" onClick={toggleDark} title="Toggle dark mode">
+          <div className={`dm-track${isDark ? ' on' : ''}`}><div className="dm-thumb"></div></div>
+          <span>{isDark ? t('topbar.light') : t('topbar.dark')}</span>
+        </div>
+
+        {/* Language picker */}
+        <div className={`lang-wrap${showLang ? ' open' : ''}`}>
+          <button className="lang-toggle" id="lang-btn" onClick={handleLangToggle}>
+            {LANG_LABELS[lang] || 'EN'}
+          </button>
+          {showLang && (
+            <div className="lang-menu" ref={langMenuRef} style={{ position:'fixed' }}>
+              {SUPPORTED_LANGS.map(l => (
+                <div
+                  key={l}
+                  className={`lang-opt${lang === l ? ' active' : ''}`}
+                  data-lang={l}
+                  onClick={() => { setLang(l); setShowLang(false); }}
+                >
+                  <span className="lang-opt-code">{LANG_LABELS[l]}</span>
+                  <span>{LANG_NAMES[l]}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Notifications bell */}
+        <div
+          id="notif-bell-btn"
+          className="notif-bell"
+          onClick={() => setShowNotif(v => !v)}
+          title={t('topbar.notifications')}
+          style={{ display:'flex',alignItems:'center',gap:6 }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>
+          </svg>
+          <span>{t('topbar.notifications')}</span>
+          {unreadCount > 0 && (
+            <div className="notif-badge" style={{ position:'relative',top:'auto',right:'auto',margin:0 }}>
+              {unreadCount}
+            </div>
+          )}
+        </div>
+
+        {showNotif && (
+          <div className="notification-panel" ref={notifPanelRef}>
+            <div style={{ padding:'10px 14px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center' }}>
+              <strong style={{ fontSize:13 }}>{t('notif.header')}</strong>
+              <button className="btn btn-outline btn-sm" onClick={markAllRead}>{t('topbar.mark_read')}</button>
+            </div>
+            <div id="notif-list">
+              {!notifs.length
+                ? <div className="empty-state">{t('msg.no_notif')}</div>
+                : notifs.map(n => (
+                  <div key={n.id} className={`notif-item${!n.is_read ? ' unread' : ''}`}>
+                    <div className="notif-item-title">{n.title || n.message}</div>
+                    <div className="notif-item-meta">{timeAgo(n.created_at, t)}</div>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+        )}
+
+        {/* User chip */}
+        <div className="user-chip" onClick={() => navigate('/profile')}>
+          <div className="avatar">{user?.avatar_initials || user?.name?.[0] || '?'}</div>
+          <span>{user?.name}</span>
+          <span className="role-badge">{formatRole(user?.role)}</span>
+        </div>
+
+        <button className="btn btn-outline btn-sm" onClick={doLogout}>{t('topbar.logout')}</button>
+      </div>
+    </div>
+  );
+}

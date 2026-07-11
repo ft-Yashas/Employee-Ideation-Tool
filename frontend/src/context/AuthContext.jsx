@@ -1,0 +1,83 @@
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { authApi } from '../services/api';
+
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
+  const [user, setUser]       = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // On mount, verify any stored token is still valid
+  useEffect(() => {
+    const token = localStorage.getItem('ifqm_token');
+    if (!token) { setLoading(false); return; }
+    authApi.me()
+      .then(res => {
+        if (res.data.authenticated) {
+          setUser(res.data.user);
+        } else {
+          localStorage.removeItem('ifqm_token');
+          localStorage.removeItem('ifqm_org');
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem('ifqm_token');
+        localStorage.removeItem('ifqm_org');
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Session expiry guard — check when tab becomes visible
+  useEffect(() => {
+    const check = async () => {
+      if (!user) return;
+      try {
+        const res = await authApi.me();
+        if (!res.data.authenticated) logout();
+      } catch { /* network error — don't force logout */ }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    const interval = setInterval(check, 600000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(interval);
+    };
+  }, [user]);
+
+  const login = useCallback(async ({ email, password, org_slug }) => {
+    const res = await authApi.login({ email, password, org_slug });
+    if (res.data.success) {
+      localStorage.setItem('ifqm_token', res.data.token);
+      if (org_slug) localStorage.setItem('ifqm_org', org_slug);
+      else localStorage.removeItem('ifqm_org');
+      setUser(res.data.user);
+      return { success: true, user: res.data.user };
+    }
+    return { success: false, error: res.data.error || 'Login failed.' };
+  }, []);
+
+  const logout = useCallback(async () => {
+    try { await authApi.logout(); } catch { /* ignore */ }
+    localStorage.removeItem('ifqm_token');
+    localStorage.removeItem('ifqm_org');
+    setUser(null);
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await authApi.me();
+      if (res.data.authenticated) setUser(res.data.user);
+    } catch { /* ignore */ }
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, setUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
+}

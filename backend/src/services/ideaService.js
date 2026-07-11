@@ -1,0 +1,717 @@
+/**
+ * Idea service — Node port of PHP api/ideas.php (idea lifecycle + workflow).
+ *
+ * Actions ported here: list, my, review, get, submit, draft, review_action,
+ * dashboard, assign_reviewers, reviewer_decision, check_duplicate, bulk_review,
+ * update_roi, update_implementation.
+ *
+ * Deferred to Module 4 (Voting), where they belong: board, community_vote
+ * (they physically live in ideas.php but are community-voting features).
+ *
+ * SQL, role scoping, workflow/escalation rules, points, notifications, emails,
+ * and status transitions mirror the PHP exactly.
+ *
+ * Intentional migration difference: PHP wrapped user-provided name fields in
+ * htmlspecialchars() (esc) before returning JSON, because the old vanilla-JS
+ * frontend injected them via innerHTML. The React frontend escapes on render,
+ * so we return raw values — applying esc() here would double-escape in React.
+ * XSS protection thus moves from the server to React's automatic escaping.
+ */
+import config from '../config/index.js';
+import { computeAIScoreWithReason } from './aiService.js';
+import { getApprovalConfig } from './settingsService.js';
+import { getOrgSettings, queueEmail } from './mailerService.js';
+import { generateIdeaCode, addNotification, addWorkflow, addPoints } from './coreHelpers.js';
+import { badRequest, forbidden, notFound, ApiError } from '../utils/respond.js';
+
+const POINTS = config.points;
+
+const INDIVIDUAL_ROLES = ['trainee', 'employee'];
+const TEAM_ROLES = ['team_lead', 'project_lead', 'manager', 'senior_manager'];
+const ADMIN_ROLES = ['executive', 'admin', 'super_admin'];
+const PRIVILEGED_ANON = ['manager', 'senior_manager', 'executive', 'admin', 'super_admin'];
+
+// ── LIST ────────────────────────────────────────────────────────────
+export async function list(db, user, { status, search, impact } = {}) {
+  const where = [];
+  const params = [];
+
+  if (INDIVIDUAL_ROLES.includes(user.role)) {
+    where.push('(i.submitter_id = ? OR i.co_suggester_1_id = ? OR i.co_suggester_2_id = ?)');
+    params.push(user.id, user.id, user.id);
+  } else if (TEAM_ROLES.includes(user.role)) {
+    where.push('(i.submitter_id IN (SELECT id FROM users WHERE manager_id = ?) OR i.submitter_id = ?)');
+    params.push(user.id, user.id);
+  }
+
+  if (status) { where.push('i.status = ?'); params.push(status); }
+  if (search) { where.push('(i.title LIKE ? OR i.idea_code LIKE ?)'); const s = `%${search}%`; params.push(s, s); }
+  if (impact) { where.push('i.impact_level = ?'); params.push(impact); }
+
+  const uid = Number(user.id);
+  const paramsList = [uid, ...params];
+  const sql =
+    `SELECT i.*, u.name AS submitter_name, u.department, u.avatar_initials,
+            c1.name AS co1_name, c2.name AS co2_name,
+            (SELECT COUNT(*) FROM idea_votes WHERE idea_id=i.id) AS vote_count,
+            (SELECT ROUND(AVG(rating),1) FROM idea_votes WHERE idea_id=i.id) AS avg_rating,
+            (SELECT vote_type FROM idea_community_votes WHERE idea_id=i.id AND user_id=?) AS user_community_vote
+     FROM ideas i
+     JOIN users u ON u.id = i.submitter_id
+     LEFT JOIN users c1 ON c1.id = i.co_suggester_1_id
+     LEFT JOIN users c2 ON c2.id = i.co_suggester_2_id` +
+    (where.length ? ' WHERE ' + where.join(' AND ') : '') +
+    ' ORDER BY i.updated_at DESC LIMIT 100';
+
+  const [ideas] = await db.execute(sql, paramsList);
+
+  const canSeeAnon = PRIVILEGED_ANON.includes(user.role);
+  if (!canSeeAnon) {
+    for (const idea of ideas) {
+      if (idea.is_anonymous) {
+        idea.submitter_name = 'Anonymous';
+        idea.avatar_initials = '?';
+        idea.department = '—';
+      }
+    }
+  }
+  return { success: true, ideas };
+}
+
+// ── MY ──────────────────────────────────────────────────────────────
+export async function my(db, user) {
+  const uid = Number(user.id);
+  const [ideas] = await db.execute(
+    `SELECT i.*, c1.name AS co1_name, c2.name AS co2_name,
+            (SELECT COUNT(*) FROM idea_votes WHERE idea_id=i.id) AS vote_count,
+            (SELECT ROUND(AVG(rating),1) FROM idea_votes WHERE idea_id=i.id) AS avg_rating,
+            (SELECT vote_type FROM idea_community_votes WHERE idea_id=i.id AND user_id=?) AS user_community_vote
+     FROM ideas i
+     LEFT JOIN users c1 ON c1.id = i.co_suggester_1_id
+     LEFT JOIN users c2 ON c2.id = i.co_suggester_2_id
+     WHERE i.submitter_id = ? OR i.co_suggester_1_id = ? OR i.co_suggester_2_id = ?
+     ORDER BY i.updated_at DESC`,
+    [uid, uid, uid, uid]
+  );
+  return { success: true, ideas };
+}
+
+// ── REVIEW QUEUE ────────────────────────────────────────────────────
+export async function review(db, user) {
+  const uid = Number(user.id);
+  const cfg = await getApprovalConfig(db);
+
+  if (cfg.reviewer_roles.includes(user.role)) {
+    const sql =
+      `SELECT DISTINCT i.*, u.name AS submitter_name, u.department, u.avatar_initials,
+              ir.decision AS my_reviewer_decision,
+              (SELECT COUNT(*) FROM idea_votes WHERE idea_id=i.id) AS vote_count,
+              (SELECT ROUND(AVG(rating),1) FROM idea_votes WHERE idea_id=i.id) AS avg_rating,
+              (SELECT COUNT(*) FROM idea_reviewers WHERE idea_id=i.id) AS reviewer_count,
+              (SELECT COUNT(*) FROM idea_reviewers WHERE idea_id=i.id AND decision='approved') AS approved_count,
+              (SELECT COUNT(*) FROM idea_reviewers WHERE idea_id=i.id AND decision='rejected') AS rejected_count,
+              (SELECT vote_type FROM idea_community_votes WHERE idea_id=i.id AND user_id=?) AS user_community_vote
+       FROM ideas i
+       JOIN users u ON u.id = i.submitter_id
+       LEFT JOIN idea_reviewers ir ON ir.idea_id = i.id AND ir.reviewer_id = ?
+       WHERE i.status IN ('Submitted','Under Review')
+         AND (i.workflow_type = 'hierarchical'
+              AND (i.current_reviewer_id = ? OR (i.current_reviewer_id IS NULL AND u.manager_id = ?))
+              OR i.workflow_type = 'multi_reviewer' AND ir.decision = 'pending')
+       ORDER BY i.review_due_date ASC, i.ai_score DESC, i.submitted_at ASC`;
+    const [ideas] = await db.execute(sql, [uid, uid, uid, uid]);
+    return { success: true, ideas };
+  }
+
+  // Admin / exec / super_admin — see all non-draft ideas in the queue
+  const [ideas] = await db.execute(
+    `SELECT DISTINCT i.*, u.name AS submitter_name, u.department, u.avatar_initials,
+            (SELECT COUNT(*) FROM idea_votes WHERE idea_id=i.id) AS vote_count,
+            (SELECT ROUND(AVG(rating),1) FROM idea_votes WHERE idea_id=i.id) AS avg_rating,
+            (SELECT COUNT(*) FROM idea_reviewers WHERE idea_id=i.id) AS reviewer_count,
+            (SELECT COUNT(*) FROM idea_reviewers WHERE idea_id=i.id AND decision='approved') AS approved_count,
+            (SELECT COUNT(*) FROM idea_reviewers WHERE idea_id=i.id AND decision='rejected') AS rejected_count,
+            (SELECT vote_type FROM idea_community_votes WHERE idea_id=i.id AND user_id=?) AS user_community_vote
+     FROM ideas i
+     JOIN users u ON u.id = i.submitter_id
+     WHERE i.status IN ('Submitted','Under Review')
+     ORDER BY i.review_due_date ASC, i.ai_score DESC, i.submitted_at ASC`,
+    [uid]
+  );
+  return { success: true, ideas };
+}
+
+// ── GET single ──────────────────────────────────────────────────────
+export async function get(db, user, id) {
+  id = Number(id) || 0;
+  const uid = Number(user.id);
+
+  const [rows] = await db.execute(
+    `SELECT i.*, u.name AS submitter_name, u.department, u.business_unit,
+            u.avatar_initials, u.email AS submitter_email,
+            c1.name AS co1_name, c2.name AS co2_name,
+            m.name AS manager_name,
+            (SELECT COUNT(*) FROM idea_votes WHERE idea_id=i.id) AS vote_count,
+            (SELECT ROUND(AVG(rating),1) FROM idea_votes WHERE idea_id=i.id) AS avg_rating,
+            (SELECT vote_type FROM idea_community_votes WHERE idea_id=i.id AND user_id=?) AS user_community_vote
+     FROM ideas i
+     JOIN  users u  ON u.id  = i.submitter_id
+     LEFT JOIN users c1 ON c1.id = i.co_suggester_1_id
+     LEFT JOIN users c2 ON c2.id = i.co_suggester_2_id
+     LEFT JOIN users m  ON m.id  = u.manager_id
+     WHERE i.id = ?`,
+    [uid, id]
+  );
+  const idea = rows[0];
+  if (!idea) throw notFound('Idea not found');
+
+  const [att] = await db.execute('SELECT * FROM idea_attachments WHERE idea_id = ?', [id]);
+  idea.attachments = att;
+
+  const [wf] = await db.execute(
+    `SELECT w.*, u.name AS actor_name, u.role AS actor_role
+     FROM idea_workflow w JOIN users u ON u.id = w.actor_id
+     WHERE w.idea_id = ? ORDER BY w.created_at ASC`,
+    [id]
+  );
+  idea.workflow = wf;
+
+  try {
+    const [rv] = await db.execute(
+      `SELECT ir.*, u.name AS reviewer_name, u.role AS reviewer_role,
+              u.avatar_initials, u.department
+       FROM idea_reviewers ir
+       JOIN users u ON u.id = ir.reviewer_id
+       WHERE ir.idea_id = ? ORDER BY ir.assigned_at ASC`,
+      [id]
+    );
+    idea.reviewers = rv;
+  } catch {
+    idea.reviewers = [];
+  }
+
+  // Mask anonymous submitter for non-privileged roles (own idea always visible)
+  const canSeeAnon = PRIVILEGED_ANON.includes(user.role);
+  if (!canSeeAnon && idea.is_anonymous && Number(idea.submitter_id) !== uid) {
+    idea.submitter_name = 'Anonymous';
+    idea.submitter_email = null;
+    idea.avatar_initials = '?';
+    idea.department = '—';
+    idea.business_unit = '—';
+    idea.manager_name = null;
+  }
+
+  return { success: true, idea };
+}
+
+// ── SUBMIT / SAVE DRAFT ─────────────────────────────────────────────
+export async function submitOrDraft(db, user, action, b) {
+  const title = String(b.title ?? '').trim();
+  const sit = String(b.present_situation ?? '').trim();
+  const sol = String(b.proposed_solution ?? '').trim();
+  const impacts = String(b.impact_areas ?? '').trim();
+  const impLvl = b.impact_level ?? 'Medium';
+  const tangible = String(b.tangible_benefit ?? '').trim();
+  const intang = String(b.intangible_benefit ?? '').trim();
+  const co1 = b.co_suggester_1_id ? Number(b.co_suggester_1_id) : null;
+  const co2 = b.co_suggester_2_id ? Number(b.co_suggester_2_id) : null;
+  const editId = b.id ? Number(b.id) : null;
+  const isAnon = b.is_anonymous ? 1 : 0;
+  const challengeId = b.challenge_id ? Number(b.challenge_id) : null;
+  const templateType = String(b.template_type ?? '').trim() || null;
+
+  if (!title || !sit || !sol) {
+    throw badRequest('Title, present situation and proposed solution are required.');
+  }
+
+  const ai = await computeAIScoreWithReason({
+    title, present_situation: sit, proposed_solution: sol,
+    impact_areas: impacts, impact_level: impLvl,
+    tangible_benefit: tangible, intangible_benefit: intang,
+    co_suggester_1_id: co1, co_suggester_2_id: co2,
+  });
+  const aiScore = ai.score;
+  const aiReason = ai.reason;
+
+  const status = action === 'submit' ? 'Submitted' : 'Draft';
+  const submittedAt = action === 'submit' ? nowDateTime() : null;
+
+  let reviewDueDate = null;
+  let currentReviewerId = null;
+  if (action === 'submit') {
+    let slaDays = 7;
+    try {
+      const [srows] = await db.execute(
+        "SELECT value FROM org_settings WHERE key_name='review_sla_days' LIMIT 1"
+      );
+      if (srows.length) slaDays = Math.max(1, parseInt(srows[0].value, 10) || 1);
+    } catch { /* keep default */ }
+    reviewDueDate = addDays(slaDays);
+    currentReviewerId = user.manager_id ?? null;
+  }
+
+  let wasAlreadySubmitted = false;
+  if (editId && action === 'submit') {
+    const [chk] = await db.execute('SELECT status FROM ideas WHERE id=? AND submitter_id=?', [editId, user.id]);
+    const prev = chk[0]?.status;
+    wasAlreadySubmitted = prev !== undefined && prev !== 'Draft';
+  }
+
+  let ideaId;
+  if (editId) {
+    await db.execute(
+      `UPDATE ideas SET
+        title=?,present_situation=?,proposed_solution=?,
+        impact_areas=?,impact_level=?,tangible_benefit=?,intangible_benefit=?,
+        co_suggester_1_id=?,co_suggester_2_id=?,
+        is_anonymous=?,challenge_id=?,template_type=?,
+        status=?,submitted_at=COALESCE(submitted_at,?),
+        review_due_date=COALESCE(review_due_date,?),
+        current_reviewer_id=COALESCE(current_reviewer_id,?),
+        ai_score=?,ai_reason=?,
+        updated_at=NOW()
+       WHERE id=? AND submitter_id=?`,
+      [title, sit, sol, impacts, impLvl, tangible, intang,
+        co1, co2, isAnon, challengeId, templateType,
+        status, submittedAt, reviewDueDate, currentReviewerId,
+        aiScore, aiReason,
+        editId, user.id]
+    );
+    ideaId = editId;
+  } else {
+    const code = await generateIdeaCode(db);
+    const [result] = await db.execute(
+      `INSERT INTO ideas (
+          idea_code,title,present_situation,proposed_solution,
+          impact_areas,impact_level,tangible_benefit,intangible_benefit,
+          co_suggester_1_id,co_suggester_2_id,is_anonymous,challenge_id,template_type,
+          status,submitter_id,submitted_at,review_due_date,current_reviewer_id,
+          ai_score,ai_reason)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [code, title, sit, sol, impacts, impLvl, tangible, intang,
+        co1, co2, isAnon, challengeId, templateType,
+        status, user.id, submittedAt, reviewDueDate, currentReviewerId,
+        aiScore, aiReason]
+    );
+    ideaId = result.insertId;
+  }
+
+  if (action === 'submit' && !wasAlreadySubmitted) {
+    await addWorkflow(db, ideaId, user.id, 'Submitted');
+    await addPoints(db, user.id, POINTS.submit);
+
+    if (user.manager_id) {
+      await addNotification(
+        db, user.manager_id, 'New Idea Submitted',
+        `${user.name} submitted a new idea. Please review it in your queue.`, ideaId
+      );
+      const [mrows] = await db.execute('SELECT email, name FROM users WHERE id=?', [user.manager_id]);
+      const mgr = mrows[0];
+      if (mgr && mgr.email) {
+        await queueEmail(db, mgr.email, mgr.name,
+          'New Idea Requires Your Review',
+          `Dear ${mgr.name},\n\n${user.name} has submitted a new idea for your review.\n\nPlease log in to action it from your review queue.`);
+      }
+    }
+  }
+
+  const [crows] = await db.execute('SELECT idea_code FROM ideas WHERE id=?', [ideaId]);
+
+  return {
+    success: true,
+    idea_id: ideaId,
+    idea_code: crows[0].idea_code,
+    ai_score: aiScore,
+    points_added: (action === 'submit' && !wasAlreadySubmitted) ? POINTS.submit : 0,
+  };
+}
+
+// ── REVIEW ACTION (approve / reject / implement + escalation) ───────
+export async function reviewAction(db, user, b) {
+  const ideaId = Number(b.idea_id) || 0;
+  const decision = b.decision ?? '';
+  const comment = String(b.comment ?? '').trim();
+
+  if (!ideaId || !['Approved', 'Rejected', 'Implemented', 'Under Review'].includes(decision)) {
+    throw badRequest('Invalid request.');
+  }
+
+  const [irows] = await db.execute('SELECT * FROM ideas WHERE id=?', [ideaId]);
+  const idea = irows[0];
+  if (!idea) throw notFound('Idea not found.');
+
+  if (Number(idea.submitter_id) === Number(user.id)) {
+    throw forbidden('You cannot review or approve your own idea.');
+  }
+
+  const wfAction = ({ Approved: 'Approved', Rejected: 'Rejected', Implemented: 'Implemented' })[decision] || 'Reviewed';
+
+  // Idempotency guard — no duplicate identical workflow entry within 10s
+  const [dup] = await db.execute(
+    'SELECT COUNT(*) AS c FROM idea_workflow WHERE idea_id=? AND actor_id=? AND action=? AND created_at > NOW() - INTERVAL 10 SECOND',
+    [ideaId, user.id, wfAction]
+  );
+  if (Number(dup[0].c) > 0) {
+    throw new ApiError(429, 'Duplicate action detected. Please wait a moment before retrying.');
+  }
+
+  const cfg = await getApprovalConfig(db);
+  const escalationRoles = cfg.reviewer_roles;
+  const finalApproverRoles = cfg.final_roles;
+
+  if (decision === 'Approved'
+    && (idea.workflow_type ?? 'hierarchical') !== 'multi_reviewer'
+    && escalationRoles.includes(user.role)
+  ) {
+    const [mrows] = await db.execute(
+      `SELECT u2.id, u2.name, u2.role, u2.email
+       FROM users u1 JOIN users u2 ON u2.id = u1.manager_id
+       WHERE u1.id = ? LIMIT 1`,
+      [user.id]
+    );
+    const nextReviewer = mrows[0];
+    const reviewerPool = [...escalationRoles, ...finalApproverRoles];
+
+    if (nextReviewer && reviewerPool.includes(nextReviewer.role)) {
+      const lvl = Number(idea.escalation_level ?? 0) + 1;
+      await db.execute(
+        "UPDATE ideas SET status='Under Review', current_reviewer_id=?, escalation_level=?, updated_at=NOW() WHERE id=?",
+        [nextReviewer.id, lvl, ideaId]
+      );
+      await addWorkflow(db, ideaId, user.id, 'Approved',
+        `${comment ? comment + ' ' : ''}[L${lvl} Approved — escalated to ${nextReviewer.name}]`.trim());
+      await addNotification(db, nextReviewer.id, 'Idea Escalated for Review',
+        `Idea ${idea.idea_code} — "${idea.title}" — approved at level ${lvl} and escalated to you for final decision.`,
+        ideaId);
+      if (nextReviewer.email) {
+        await queueEmail(db, nextReviewer.email, nextReviewer.name,
+          `Action Required: Idea ${idea.idea_code} Escalated to You`,
+          `Dear ${nextReviewer.name},\n\nIdea "${idea.title}" (${idea.idea_code}) has been approved at level ${lvl} and escalated to you for final decision.\n\nPlease log in to take action.`);
+      }
+      return { success: true, decision: 'Escalated', escalated_to: nextReviewer.name, points_awarded: 0 };
+    }
+    // No higher reviewer — fall through to final Approved
+  }
+
+  await db.execute('UPDATE ideas SET status=?,updated_at=NOW() WHERE id=?', [decision, ideaId]);
+
+  const [codeRows] = await db.execute('SELECT idea_code FROM ideas WHERE id=?', [ideaId]);
+  const ideaCode = codeRows[0]?.idea_code || `#${ideaId}`;
+
+  await addWorkflow(db, ideaId, user.id, wfAction, comment || null);
+
+  const pts = ({ Approved: POINTS.approved, Implemented: POINTS.implemented })[decision] || 0;
+  if (pts > 0) {
+    await addPoints(db, idea.submitter_id, pts);
+    await db.execute('UPDATE ideas SET points_awarded = points_awarded + ? WHERE id=?', [pts, ideaId]);
+  }
+
+  const msg = {
+    Approved: `Your idea ${ideaCode} was Approved.${pts > 0 ? ` +${pts} points awarded.` : ''}`,
+    Rejected: `Your idea ${ideaCode} was Rejected.${comment ? ` Feedback: ${comment}` : ''}`,
+    Implemented: `Your idea ${ideaCode} is now Implemented.${pts > 0 ? ` +${pts} points awarded.` : ''}`,
+  }[decision] || `Your idea ${ideaCode} is Under Review.`;
+  await addNotification(db, idea.submitter_id, `Idea ${decision}`, msg, ideaId);
+
+  const [subRows] = await db.execute('SELECT email, name FROM users WHERE id=?', [idea.submitter_id]);
+  const sub = subRows[0];
+  if (sub && sub.email) {
+    await queueEmail(db, sub.email, sub.name, `Your Idea ${ideaCode} — ${decision}`, msg);
+  }
+
+  return { success: true, decision, points_awarded: pts };
+}
+
+// ── DASHBOARD ───────────────────────────────────────────────────────
+export async function dashboard(db, user) {
+  const uid = user.id;
+  const role = user.role;
+
+  let total;
+  if (INDIVIDUAL_ROLES.includes(role)) {
+    const [r] = await db.execute('SELECT COUNT(*) AS c FROM ideas WHERE submitter_id=?', [uid]);
+    total = Number(r[0].c);
+  } else {
+    const [r] = await db.query("SELECT COUNT(*) AS c FROM ideas WHERE status != 'Draft'");
+    total = Number(r[0].c);
+  }
+
+  const counts = {};
+  for (const s of ['Submitted', 'Under Review', 'Approved', 'Implemented', 'Rejected']) {
+    if (INDIVIDUAL_ROLES.includes(role)) {
+      const [r] = await db.execute('SELECT COUNT(*) AS c FROM ideas WHERE submitter_id=? AND status=?', [uid, s]);
+      counts[s] = Number(r[0].c);
+    } else {
+      const [r] = await db.execute('SELECT COUNT(*) AS c FROM ideas WHERE status=?', [s]);
+      counts[s] = Number(r[0].c);
+    }
+  }
+
+  let pendingReviews = 0;
+  let overdueReviews = 0;
+  if ([...TEAM_ROLES, ...ADMIN_ROLES].includes(role)) {
+    if (TEAM_ROLES.includes(role)) {
+      const [pr] = await db.execute(
+        `SELECT COUNT(*) AS c FROM ideas i JOIN users u ON u.id=i.submitter_id
+         WHERE i.status IN ('Submitted','Under Review')
+         AND (i.current_reviewer_id=? OR (i.current_reviewer_id IS NULL AND u.manager_id=?))`,
+        [uid, uid]
+      );
+      pendingReviews = Number(pr[0].c);
+      const [od] = await db.execute(
+        `SELECT COUNT(*) AS c FROM ideas i JOIN users u ON u.id=i.submitter_id
+         WHERE i.status IN ('Submitted','Under Review')
+         AND i.review_due_date IS NOT NULL AND i.review_due_date < CURDATE()
+         AND (i.current_reviewer_id=? OR (i.current_reviewer_id IS NULL AND u.manager_id=?))`,
+        [uid, uid]
+      );
+      overdueReviews = Number(od[0].c);
+    } else {
+      const [pr] = await db.query("SELECT COUNT(*) AS c FROM ideas WHERE status IN ('Submitted','Under Review')");
+      pendingReviews = Number(pr[0].c);
+      const [od] = await db.query(
+        "SELECT COUNT(*) AS c FROM ideas WHERE status IN ('Submitted','Under Review') AND review_due_date IS NOT NULL AND review_due_date < CURDATE()"
+      );
+      overdueReviews = Number(od[0].c);
+    }
+  }
+
+  const [recent] = await db.query(
+    `SELECT w.*, u.name AS actor_name, i.idea_code, i.title
+     FROM idea_workflow w
+     JOIN users u ON u.id = w.actor_id
+     JOIN ideas i ON i.id = w.idea_id
+     ORDER BY w.created_at DESC LIMIT 10`
+  );
+
+  const [pts] = await db.execute('SELECT points FROM users WHERE id=?', [uid]);
+  const userPoints = Number(pts[0]?.points ?? user.points);
+
+  return {
+    success: true,
+    total,
+    counts,
+    recent,
+    user_points: userPoints,
+    pending_reviews: pendingReviews,
+    overdue_reviews: overdueReviews,
+  };
+}
+
+// ── ASSIGN REVIEWERS (→ multi_reviewer workflow) ────────────────────
+export async function assignReviewers(db, user, b) {
+  const ideaId = Number(b.idea_id) || 0;
+  let reviewerIds = (b.reviewer_ids ?? []).map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x));
+  const threshold = Math.max(1, Math.min(100, parseInt(b.threshold ?? 100, 10) || 100));
+
+  if (!ideaId || !reviewerIds.length) throw badRequest('idea_id and reviewer_ids required.');
+
+  const [irows] = await db.execute('SELECT * FROM ideas WHERE id=?', [ideaId]);
+  const idea = irows[0];
+  if (!idea) throw notFound('Idea not found.');
+
+  // Submitter cannot be a reviewer; de-dupe
+  reviewerIds = [...new Set(reviewerIds.filter((rid) => rid !== Number(idea.submitter_id)))];
+  if (!reviewerIds.length) throw badRequest('No valid reviewers — submitter cannot review own idea.');
+
+  await db.execute('DELETE FROM idea_reviewers WHERE idea_id=?', [ideaId]);
+  await db.execute(
+    "UPDATE ideas SET workflow_type='multi_reviewer', approval_threshold=?, status='Under Review', updated_at=NOW() WHERE id=?",
+    [threshold, ideaId]
+  );
+
+  for (const rid of reviewerIds) {
+    await db.execute('INSERT INTO idea_reviewers (idea_id, reviewer_id) VALUES (?, ?)', [ideaId, rid]);
+    await addNotification(db, rid, 'Review Assigned',
+      `You have been assigned to review idea ${idea.idea_code}: ${idea.title}.`, ideaId);
+  }
+
+  await addWorkflow(db, ideaId, user.id, 'Reviewed',
+    `Routed to committee (${reviewerIds.length} reviewers, threshold: ${threshold}%)`);
+  await addNotification(db, idea.submitter_id, 'Idea Under Committee Review',
+    `Your idea ${idea.idea_code} has been routed to a review committee.`, ideaId);
+
+  return { success: true, reviewer_count: reviewerIds.length };
+}
+
+// ── REVIEWER INDIVIDUAL DECISION ────────────────────────────────────
+export async function reviewerDecision(db, user, b) {
+  const ideaId = Number(b.idea_id) || 0;
+  const decision = String(b.decision ?? '').toLowerCase();
+  const comment = String(b.comment ?? '').trim();
+
+  if (!ideaId || !['approved', 'rejected'].includes(decision)) {
+    throw badRequest('Invalid idea_id or decision.');
+  }
+
+  const [revRows] = await db.execute('SELECT * FROM idea_reviewers WHERE idea_id=? AND reviewer_id=? LIMIT 1', [ideaId, user.id]);
+  const rev = revRows[0];
+  if (!rev) throw forbidden('You are not an assigned reviewer for this idea.');
+  if (rev.decision !== 'pending') throw new ApiError(409, 'You have already submitted your decision.');
+
+  await db.execute(
+    'UPDATE idea_reviewers SET decision=?, comment=?, decided_at=NOW() WHERE idea_id=? AND reviewer_id=?',
+    [decision, comment || null, ideaId, user.id]
+  );
+  await addWorkflow(db, ideaId, user.id, decision === 'approved' ? 'Approved' : 'Rejected', comment || null);
+
+  const [irows] = await db.execute('SELECT * FROM ideas WHERE id=?', [ideaId]);
+  const idea = irows[0];
+
+  const [decRows] = await db.execute('SELECT decision FROM idea_reviewers WHERE idea_id=?', [ideaId]);
+  const allDecisions = decRows.map((r) => r.decision);
+  const total = allDecisions.length;
+  const approved = allDecisions.filter((d) => d === 'approved').length;
+  const rejected = allDecisions.filter((d) => d === 'rejected').length;
+  const pending = allDecisions.filter((d) => d === 'pending').length;
+
+  const cfg = await getApprovalConfig(db);
+  const threshold = cfg.mode === 'custom' ? cfg.threshold : parseInt(idea.approval_threshold ?? 100, 10);
+
+  let newStatus = null;
+  let pts = 0;
+  if (threshold === 100 && rejected > 0) {
+    newStatus = 'Rejected';
+  } else if (pending === 0) {
+    const rate = total > 0 ? (approved / total) * 100 : 0;
+    if (rate >= threshold) { newStatus = 'Approved'; pts = POINTS.approved; }
+    else { newStatus = 'Rejected'; }
+  }
+
+  if (newStatus) {
+    await db.execute('UPDATE ideas SET status=?, updated_at=NOW() WHERE id=?', [newStatus, ideaId]);
+    if (pts > 0) {
+      await addPoints(db, idea.submitter_id, pts);
+      await db.execute('UPDATE ideas SET points_awarded = points_awarded + ? WHERE id=?', [pts, ideaId]);
+    }
+    const ideaCode = idea.idea_code || `#${ideaId}`;
+    const summary = `${approved}/${total} approved`;
+    const msg = newStatus === 'Approved'
+      ? `Your idea ${ideaCode} was Approved by committee (${summary}).${pts > 0 ? ` +${pts} points awarded.` : ''}`
+      : `Your idea ${ideaCode} was Rejected by committee (${summary}).`;
+    await addNotification(db, idea.submitter_id, `Idea ${newStatus}`, msg, ideaId);
+  }
+
+  return { success: true, new_status: newStatus, approved, rejected, pending, total };
+}
+
+// ── DUPLICATE DETECTION ─────────────────────────────────────────────
+export async function checkDuplicate(db, title) {
+  title = String(title ?? '').trim();
+  if (title.length < 5) return { success: true, duplicates: [] };
+
+  const words = title.replace(/\s+/g, ' ').toLowerCase().split(' ').filter((w) => w.length > 3);
+  if (!words.length) return { success: true, duplicates: [] };
+
+  const like = `%${words.slice(0, 4).join('%')}%`;
+  const [rows] = await db.execute(
+    "SELECT id, idea_code, title, status FROM ideas WHERE title LIKE ? AND status != 'Draft' LIMIT 5",
+    [like]
+  );
+  return { success: true, duplicates: rows };
+}
+
+// ── BULK REVIEW ─────────────────────────────────────────────────────
+export async function bulkReview(db, user, b) {
+  const ideaIds = (b.idea_ids ?? []).map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x));
+  const decision = b.decision ?? '';
+  const comment = String(b.comment ?? '').trim();
+
+  if (!ideaIds.length || !['Approved', 'Rejected'].includes(decision)) {
+    throw badRequest('idea_ids array and valid decision (Approved/Rejected) required.');
+  }
+
+  let processed = 0;
+  for (const ideaId of ideaIds) {
+    const [irows] = await db.execute("SELECT * FROM ideas WHERE id=? AND status IN ('Submitted','Under Review')", [ideaId]);
+    const idea = irows[0];
+    if (!idea || Number(idea.submitter_id) === Number(user.id)) continue;
+
+    await db.execute('UPDATE ideas SET status=?, updated_at=NOW() WHERE id=?', [decision, ideaId]);
+    await addWorkflow(db, ideaId, user.id, decision, comment || null);
+
+    const pts = decision === 'Approved' ? POINTS.approved : 0;
+    if (pts > 0) {
+      await addPoints(db, idea.submitter_id, pts);
+      await db.execute('UPDATE ideas SET points_awarded = points_awarded + ? WHERE id=?', [pts, ideaId]);
+    }
+
+    const msg = decision === 'Approved'
+      ? `Your idea ${idea.idea_code} was Approved (bulk). +${pts} points awarded.`
+      : `Your idea ${idea.idea_code} was Rejected (bulk).${comment ? ` Feedback: ${comment}` : ''}`;
+    await addNotification(db, idea.submitter_id, `Idea ${decision}`, msg, ideaId);
+    processed++;
+  }
+
+  return { success: true, processed };
+}
+
+// ── UPDATE ROI ──────────────────────────────────────────────────────
+export async function updateRoi(db, user, b) {
+  const ideaId = Number(b.idea_id) || 0;
+  const roiValue = (b.roi_value !== undefined && b.roi_value !== '') ? Number(b.roi_value) : null;
+  const roiType = b.roi_type ?? null;
+  const roiDesc = String(b.roi_description ?? '').trim() || null;
+
+  const validTypes = ['cost_saving', 'time_saving', 'quality_improvement', 'revenue_increase', 'other'];
+  if (!ideaId) throw badRequest('idea_id required.');
+  if (roiType && !validTypes.includes(roiType)) throw badRequest('Invalid roi_type.');
+
+  await db.execute(
+    'UPDATE ideas SET roi_value=?, roi_type=?, roi_description=?, updated_at=NOW() WHERE id=?',
+    [roiValue, roiType || null, roiDesc, ideaId]
+  );
+
+  await addWorkflow(db, ideaId, user.id, 'ROI Updated',
+    (roiType ? ucwords(roiType.replace(/_/g, ' ')) : '') +
+    (roiValue !== null ? ': ' + numberFormat(roiValue, 2) : ''));
+
+  return { success: true };
+}
+
+// ── UPDATE IMPLEMENTATION TRACKING ──────────────────────────────────
+export async function updateImplementation(db, user, b) {
+  const ideaId = Number(b.idea_id) || 0;
+  const ownerId = b.implementation_owner_id ? Number(b.implementation_owner_id) : null;
+  const targetDate = b.implementation_target_date ? b.implementation_target_date : null;
+  const implStatus = b.implementation_status ?? null;
+
+  const validStatuses = ['not_started', 'in_progress', 'completed', 'on_hold'];
+  if (!ideaId) throw badRequest('idea_id required.');
+  if (implStatus && !validStatuses.includes(implStatus)) throw badRequest('Invalid implementation_status.');
+
+  await db.execute(
+    'UPDATE ideas SET implementation_owner_id=?, implementation_target_date=?, implementation_status=?, updated_at=NOW() WHERE id=?',
+    [ownerId, targetDate, implStatus || null, ideaId]
+  );
+
+  await addWorkflow(db, ideaId, user.id, 'Implementation Updated',
+    implStatus ? 'Status: ' + ucwords(implStatus.replace(/_/g, ' ')) : null);
+
+  return { success: true };
+}
+
+// ── small utils ─────────────────────────────────────────────────────
+// Local-time formatters (PHP date() uses server-local time; avoid the UTC
+// off-by-one that toISOString() could cause on DATE values near midnight).
+const p2 = (n) => String(n).padStart(2, '0');
+function nowDateTime() {
+  const d = new Date();
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+}
+function addDays(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+}
+function ucwords(s) {
+  return String(s).replace(/(^|\s)\S/g, (c) => c.toUpperCase());
+}
+function numberFormat(n, decimals = 2) {
+  return Number(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+export default {
+  list, my, review, get, submitOrDraft, reviewAction, dashboard,
+  assignReviewers, reviewerDecision, checkDuplicate, bulkReview, updateRoi, updateImplementation,
+};
