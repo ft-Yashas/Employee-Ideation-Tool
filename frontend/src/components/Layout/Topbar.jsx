@@ -13,15 +13,15 @@ const PAGE_TITLES = {
   '/submit':       'form.submit_idea',
   '/review':       'nav.review',
   '/all-ideas':    'nav.all_ideas',
-  '/board':        'nav.all_ideas',
-  '/challenges':   'nav.submit',
+  '/board':        'nav.board',
+  '/challenges':   'nav.challenges',
   '/audit':        'nav.audit',
   '/leaderboard':  'nav.leaderboard',
   '/analytics':    'nav.analytics',
   '/admin':        'nav.admin',
   '/super-admin':  'nav.super_admin',
   '/profile':      'nav.profile',
-  '/platform':     'pa.overview',
+  '/platform':     'nav.platform',
 };
 
 export default function Topbar({ onToggleSidebar }) {
@@ -68,18 +68,9 @@ export default function Topbar({ onToggleSidebar }) {
     return () => document.removeEventListener('click', handler);
   }, [showNotif, showLang]);
 
-  // Position lang menu
   function handleLangToggle(e) {
     e.stopPropagation();
     setShowLang(v => !v);
-    if (!showLang && langMenuRef.current) {
-      const btn = document.getElementById('lang-btn');
-      if (btn) {
-        const r = btn.getBoundingClientRect();
-        langMenuRef.current.style.top  = (r.bottom + 6) + 'px';
-        langMenuRef.current.style.right = (window.innerWidth - r.right) + 'px';
-      }
-    }
   }
 
   return (
@@ -96,7 +87,7 @@ export default function Topbar({ onToggleSidebar }) {
 
       <div className="topbar-right">
         {/* Dark mode toggle */}
-        <div className="dm-toggle" onClick={toggleDark} title="Toggle dark mode">
+        <div className="dm-toggle" onClick={toggleDark} title={t('topbar.toggle_dark')}>
           <div className={`dm-track${isDark ? ' on' : ''}`}><div className="dm-thumb"></div></div>
           <span>{isDark ? t('topbar.light') : t('topbar.dark')}</span>
         </div>
@@ -107,7 +98,7 @@ export default function Topbar({ onToggleSidebar }) {
             {LANG_LABELS[lang] || 'EN'}
           </button>
           {showLang && (
-            <div className="lang-menu" ref={langMenuRef} style={{ position:'fixed' }}>
+            <div className="lang-menu" ref={langMenuRef}>
               {SUPPORTED_LANGS.map(l => (
                 <div
                   key={l}
@@ -166,7 +157,7 @@ export default function Topbar({ onToggleSidebar }) {
         <div className="user-chip" onClick={() => navigate('/profile')}>
           <div className="avatar">{user?.avatar_initials || user?.name?.[0] || '?'}</div>
           <span>{user?.name}</span>
-          <span className="role-badge">{formatRole(user?.role)}</span>
+          <span className="role-badge">{formatRole(user?.role, t)}</span>
         </div>
 
         <button className="btn btn-outline btn-sm" onClick={doLogout}>{t('topbar.logout')}</button>

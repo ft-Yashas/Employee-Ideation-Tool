@@ -36,42 +36,42 @@ export default function LoginPage() {
         else if (role === 'super_admin') navigate('/super-admin');
         else navigate('/dashboard');
       } else {
-        setError(result.error || 'Login failed.');
+        setError(result.error || t('login.failed'));
       }
     } catch(err) {
-      setError('Server error. Please try again.');
+      setError(t('msg.server_error'));
     }
     setLoading(false);
   }
 
   async function handleForgotPassword(e) {
     e.preventDefault();
-    const emailPrompt = prompt('Enter your registered email address:');
+    const emailPrompt = prompt(t('login.prompt_email'));
     if (!emailPrompt?.trim()) return;
     try {
       const res = await authApi.forgotPassword({ email: emailPrompt.trim(), org_slug: orgSlug });
       if (res.data.success) {
-        showToast('If an account with that email exists, a reset link has been sent.', 'success');
+        showToast(t('login.reset_sent'), 'success');
       } else {
-        showToast(res.data.error || 'Request failed.', 'danger');
+        showToast(res.data.error || t('login.request_failed'), 'danger');
       }
-    } catch { showToast('Network error. Please try again.', 'danger'); }
+    } catch { showToast(t('msg.network_error'), 'danger'); }
   }
 
   async function handleResetPassword(token) {
-    const pw1 = prompt('Enter your new password (min. 8 characters):');
-    if (!pw1 || pw1.length < 8) { showToast('Password must be at least 8 characters.', 'warning'); return; }
-    const pw2 = prompt('Confirm your new password:');
-    if (pw1 !== pw2) { showToast('Passwords do not match.', 'warning'); return; }
+    const pw1 = prompt(t('login.prompt_new_pw'));
+    if (!pw1 || pw1.length < 8) { showToast(t('login.pw_too_short'), 'warning'); return; }
+    const pw2 = prompt(t('login.prompt_confirm_pw'));
+    if (pw1 !== pw2) { showToast(t('login.pw_mismatch'), 'warning'); return; }
     try {
       const res = await authApi.resetPassword({ token, password: pw1, org_slug: params.get('org') || '' });
       if (res.data.success) {
-        showToast('Password updated. Please sign in.', 'success');
+        showToast(t('login.pw_updated'), 'success');
         navigate('/');
       } else {
-        showToast(res.data.error || 'Reset failed. The link may have expired.', 'danger');
+        showToast(res.data.error || t('login.reset_failed'), 'danger');
       }
-    } catch { showToast('Network error. Please try again.', 'danger'); }
+    } catch { showToast(t('msg.network_error'), 'danger'); }
   }
 
   return (
@@ -146,7 +146,7 @@ export default function LoginPage() {
                 type="text"
                 value={orgSlug}
                 onChange={e => setOrgSlug(e.target.value)}
-                placeholder="your-org-code"
+                placeholder={t('login.org_ph')}
                 autoComplete="organization"
                 style={{ textTransform:'lowercase' }}
               />
@@ -185,13 +185,13 @@ export default function LoginPage() {
               disabled={loading}
               style={{ width:'100%',justifyContent:'center',padding:'11px',fontSize:14 }}
             >
-              {loading ? 'Logging in…' : t('login.btn')}
+              {loading ? t('login.signing_in') : t('login.btn')}
             </button>
           </form>
 
           <div className="separator"></div>
           <p style={{ fontSize:11,color:'#aaa',textAlign:'center' }}>
-            Powered by IFQM · Multi-Tenant · Role-Based Access Control
+            {t('login.powered_by')}
           </p>
           <div style={{ textAlign:'center',marginTop:4 }}>
             <a href="#" onClick={handleForgotPassword} style={{ fontSize:11,color:'#888',textDecoration:'none' }}>

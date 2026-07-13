@@ -36,7 +36,7 @@ export default function AssignReviewersModal({ ideaId, ideaCode, onClose }) {
   }
 
   async function handleSubmit() {
-    if (!selected.length) { showToast('Select at least one reviewer.', 'warning'); return; }
+    if (!selected.length) { showToast(t('ar.need_one'), 'warning'); return; }
     setLoading(true);
     try {
       const res = await ideasApi.assignReviewers({
@@ -45,10 +45,10 @@ export default function AssignReviewersModal({ ideaId, ideaCode, onClose }) {
         approval_threshold: threshold,
       });
       if (res.data.success) {
-        showToast('Reviewers assigned. Idea routed to committee.', 'success');
+        showToast(t('ar.assigned_ok'), 'success');
         onClose();
-      } else showToast(res.data.error || 'Failed to assign reviewers.', 'danger');
-    } catch { showToast('Server error.', 'danger'); }
+      } else showToast(res.data.error || t('msg.server_error'), 'danger');
+    } catch { showToast(t('msg.server_error'), 'danger'); }
     setLoading(false);
   }
 
@@ -61,10 +61,10 @@ export default function AssignReviewersModal({ ideaId, ideaCode, onClose }) {
         </div>
         <div className="modal-body">
           <div className="form-group">
-            <label>Search Reviewers</label>
+            <label>{t('ar.search_label')}</label>
             <div className="pos-rel">
               <input className="form-control" value={query} onChange={e => handleSearch(e.target.value)}
-                placeholder="Search by name or employee ID…" />
+                placeholder={t('form.co_search_ph')} />
               {results.length > 0 && (
                 <div className="user-search-results" style={{ display:'block' }}>
                   {results.map(u => (
@@ -79,7 +79,7 @@ export default function AssignReviewersModal({ ideaId, ideaCode, onClose }) {
 
           {selected.length > 0 && (
             <div className="form-group">
-              <label>Selected Reviewers ({selected.length})</label>
+              <label>{t('ar.selected')} ({selected.length})</label>
               <div style={{ display:'flex',flexWrap:'wrap',gap:6 }}>
                 {selected.map(u => (
                   <span key={u.id} style={{ display:'flex',alignItems:'center',gap:4,background:'var(--chip-bg)',border:'1px solid var(--border)',borderRadius:'var(--r-full)',padding:'3px 10px',fontSize:12 }}>
@@ -92,18 +92,18 @@ export default function AssignReviewersModal({ ideaId, ideaCode, onClose }) {
           )}
 
           <div className="form-group">
-            <label>Approval Threshold (%)</label>
+            <label>{t('ar.threshold')}</label>
             <input className="form-control" type="number" min="1" max="100"
               value={threshold} onChange={e => setThreshold(parseInt(e.target.value)||100)} style={{ maxWidth:120 }} />
             <div style={{ fontSize:11,color:'var(--subtle)',marginTop:3 }}>
-              % of reviewers who must approve. 100% = all must approve.
+              {t('ar.threshold_hint')}
             </div>
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn btn-outline" onClick={onClose}>{t('btn.cancel')}</button>
           <button className="btn btn-primary" disabled={loading || !selected.length} onClick={handleSubmit}>
-            {loading ? t('msg.loading') : 'Assign Reviewers'}
+            {loading ? t('msg.loading') : t('ar.assign')}
           </button>
         </div>
       </div>

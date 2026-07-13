@@ -28,8 +28,8 @@ export default function PlatformTenantsPage() {
     try {
       const res = await platformApi.tenantHierarchy(id);
       if (res.data.success) setUsers(res.data.users || []);
-      else setError(res.data.error || 'Failed to load hierarchy.');
-    } catch { setError('Failed to load tenant data.'); }
+      else setError(res.data.error || t('msg.fail_load'));
+    } catch { setError(t('msg.fail_load')); }
     setLoading(false);
   }
 
@@ -51,9 +51,9 @@ export default function PlatformTenantsPage() {
   return (
     <>
       <div style={{ display:'flex',alignItems:'center',gap:10,marginBottom:20 }}>
-        <button className="btn btn-outline btn-sm" onClick={() => navigate('/platform')}>← Back</button>
+        <button className="btn btn-outline btn-sm" onClick={() => navigate('/platform')}>← {t('btn.back')}</button>
         <h2 id="pt-tenant-name" style={{ fontSize:16,fontWeight:700,color:'var(--heading)',margin:0 }}>
-          {tenantName} — Org Hierarchy
+          {tenantName} — {t('pa.org_hierarchy')}
         </h2>
       </div>
 
@@ -76,7 +76,7 @@ export default function PlatformTenantsPage() {
 
           <div className="card" id="pt-hierarchy-body" style={{ marginTop:20 }}>
             {!users.length
-              ? <div className="empty-state">{t('msg.no_ideas')}</div>
+              ? <div className="empty-state">{t('sa.no_users')}</div>
               : ROLE_ORDER.map(role => {
                 if (!byRole[role].length) return null;
                 const color = ROLE_COLORS[role] || '#888';
@@ -98,7 +98,7 @@ export default function PlatformTenantsPage() {
                               {u.manager_name ? ` · ${t('platform.reports_to')} ${u.manager_name}` : ''}
                             </div>
                             <div style={{ fontSize:11,color:'#f59e0b',marginTop:2,fontWeight:600 }}>
-                              {u.idea_count} idea{u.idea_count!=1?'s':''}
+                              {u.idea_count} {t('unit.ideas')}
                             </div>
                           </div>
                         </div>

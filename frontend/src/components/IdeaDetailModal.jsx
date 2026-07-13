@@ -4,14 +4,14 @@ import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
 import { ideasApi, votesApi } from '../services/api';
 import {
-  statusBadge, impactBadge, scoreBadgeClass, translateStatus, translateImpact,
+  statusBadge, impactBadge, scoreBadgeClass, translateStatus, translateImpact, translateAreas,
   fmtDate, actionLabel, isPrivileged, communityScore,
 } from '../utils/helpers';
 import ReviewActionModal from './ReviewActionModal';
 import AssignReviewersModal from './AssignReviewersModal';
 import ReviewerDecisionModal from './ReviewerDecisionModal';
 
-const TABS = ['Details', 'Timeline', 'Attachments'];
+const TAB_KEYS = ['modal.details', 'modal.timeline', 'modal.attachments'];
 
 export default function IdeaDetailModal({ ideaId, onClose }) {
   const { user }      = useAuth();
@@ -35,7 +35,7 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
     setError('');
     try {
       const res = await ideasApi.get(ideaId);
-      if (!res.data.success) { setError(res.data.error || 'Error loading idea.'); setLoading(false); return; }
+      if (!res.data.success) { setError(res.data.error || t('msg.fail_idea')); setLoading(false); return; }
       setIdea(res.data.idea);
       // Load vote stats in background (non-critical)
       Promise.all([
@@ -45,7 +45,7 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
         setVoteData(vr.data);
         setCommData(cr.data);
       }).catch(() => {});
-    } catch { setError('Failed to load idea. Please try again.'); }
+    } catch { setError(t('msg.fail_idea')); }
     setLoading(false);
   }
 
@@ -55,8 +55,8 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
       if (res.data.success) {
         const [vr, cr] = await Promise.all([votesApi.stats({ idea_id: ideaId }), votesApi.communityStats({ idea_id: ideaId })]);
         setVoteData(vr.data); setCommData(cr.data);
-      } else showToast(res.data.error || 'Error', 'danger');
-    } catch { showToast('Network error', 'danger'); }
+      } else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch { showToast(t('msg.network_error'), 'danger'); }
   }
 
   async function castRating(ideaId, rating) {
@@ -65,9 +65,9 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
       if (res.data.success) {
         const vr = await votesApi.stats({ idea_id: ideaId });
         setVoteData(vr.data);
-        showToast(`Rating submitted: ${rating}/5 ⭐`, 'success');
-      } else showToast(res.data.error || 'Error', 'danger');
-    } catch { showToast('Network error', 'danger'); }
+        showToast(`${t('community.rating_ok')}: ${rating}/5 ⭐`, 'success');
+      } else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch { showToast(t('msg.network_error'), 'danger'); }
   }
 
   if (!idea && !loading && !error) return null;
@@ -104,7 +104,7 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
         <div className="modal" style={{ maxWidth:740 }}>
           <div className="modal-header">
             <span>
-              <strong id="modal-idea-code">{loading ? 'Loading…' : idea ? `#${idea.idea_code}` : ''}</strong>
+              <strong id="modal-idea-code">{loading ? t('msg.loading') : idea ? `#${idea.idea_code}` : ''}</strong>
               <span id="modal-idea-title-sub" style={{ fontWeight:400,color:'var(--subtle)',marginLeft:8,fontSize:13 }}>
                 {idea?.title}
               </span>
@@ -114,8 +114,8 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
 
           {/* Tabs */}
           <div className="tab-bar" style={{ padding:'0 20px' }}>
-            {TABS.map((label, i) => (
-              <div key={i} className={`tab${activeTab===i?' active':''}`} onClick={() => setActiveTab(i)}>{label}</div>
+            {TAB_KEYS.map((key, i) => (
+              <div key={key} className={`tab${activeTab===i?' active':''}`} onClick={() => setActiveTab(i)}>{t(key)}</div>
             ))}
           </div>
 
@@ -144,7 +144,7 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
                     <div style={{ background:'#f8f9fe',padding:10,borderRadius:6,fontSize:13 }}>{idea.proposed_solution}</div>
                   </div>
                   <div className="form-row" style={{ marginBottom:10 }}>
-                    <div><strong>{t('detail.impact_areas')}:</strong> {idea.impact_areas||'–'}</div>
+                    <div><strong>{t('detail.impact_areas')}:</strong> {translateAreas(idea.impact_areas, t)||'–'}</div>
                     <div><strong>{t('detail.impact_level')}:</strong> <span className={`badge ${impactBadge(idea.impact_level)}`}>{translateImpact(idea.impact_level,t)||'–'}</span></div>
                   </div>
                   {idea.tangible_benefit   && <div style={{ marginTop:8 }}><strong>{t('detail.tangible')}:</strong> {idea.tangible_benefit}</div>}
@@ -205,13 +205,13 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
                                   background:userVote==='up'?'#bbf7d0':'var(--chip-bg)',
                                   color:userVote==='up'?'#10b981':'var(--text-muted)',
                                   border:`1px solid ${userVote==='up'?'#bbf7d0':'var(--border)'}` }}
-                                onClick={() => castVote(ideaId,'up')}>▲ Upvote</button>
+                                onClick={() => castVote(ideaId,'up')}>▲ {t('community.upvote')}</button>
                               <button className="btn btn-sm"
                                 style={{ padding:'4px 12px',borderRadius:8,fontWeight:700,
                                   background:userVote==='down'?'#fee2e2':'var(--chip-bg)',
                                   color:userVote==='down'?'#ef4444':'var(--text-muted)',
                                   border:`1px solid ${userVote==='down'?'#fecaca':'var(--border)'}` }}
-                                onClick={() => castVote(ideaId,'down')}>▼ Downvote</button>
+                                onClick={() => castVote(ideaId,'down')}>▼ {t('community.downvote')}</button>
                               <span style={{ fontSize:11,color:'var(--subtle)' }}>{t('community.vote_hint')}</span>
                             </div>
                           )}
@@ -221,14 +221,14 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
                       {/* Star rating */}
                       {!isSelf && idea.status !== 'Draft' && (
                         <div style={{ borderTop:'1px solid var(--border)',paddingTop:10,marginTop:10 }}>
-                          <div style={{ fontSize:11,color:'var(--subtle)',marginBottom:6,fontWeight:600 }}>COMMUNITY RATING (1–5 stars)</div>
+                          <div style={{ fontSize:11,color:'var(--subtle)',marginBottom:6,fontWeight:600,textTransform:'uppercase' }}>{t('community.rating_title')}</div>
                           {avgRating > 0 && (
                             <div style={{ display:'flex',alignItems:'center',gap:8,marginBottom:6 }}>
                               <span style={{ color:'#f59e0b',fontWeight:700 }}>{avgRating.toFixed(1)} ⭐</span>
-                              <span style={{ fontSize:11,color:'var(--subtle)' }}>{voteCount} {t('idea.votes')}</span>
+                              <span style={{ fontSize:11,color:'var(--subtle)' }}>{voteCount} {t('unit.votes')}</span>
                             </div>
                           )}
-                          <StarWidget ideaId={ideaId} userRating={userRating} onRate={castRating} />
+                          <StarWidget ideaId={ideaId} userRating={userRating} onRate={castRating} t={t} />
                         </div>
                       )}
                     </div>
@@ -255,7 +255,11 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
                               </div>
                               <div>
                                 <div style={{ fontSize:12,fontWeight:600 }}>{rv.reviewer_name}</div>
-                                <div style={{ fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:.4,color:rvColor }}>{rv.decision}</div>
+                                <div style={{ fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:.4,color:rvColor }}>
+                                  {t(rv.decision==='approved' ? 'committee.approved_count'
+                                    : rv.decision==='rejected' ? 'committee.rejected_count'
+                                    : 'committee.pending_count')}
+                                </div>
                                 {rv.comment && <div style={{ fontSize:11,color:'var(--subtext)',marginTop:2,fontStyle:'italic' }}>"{rv.comment}"</div>}
                               </div>
                             </div>
@@ -269,12 +273,12 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
                 {/* Tab 1: Timeline */}
                 <div id="dtab2" className={`tab-content${activeTab===1?' active':''}`} style={{ display:activeTab===1?'block':'none' }}>
                   {!(idea.workflow||[]).length
-                    ? <div className="empty-state">No workflow history yet.</div>
+                    ? <div className="empty-state">{t('detail.no_timeline')}</div>
                     : (idea.workflow||[]).map((w, i) => (
                       <div key={i} className="tl-item">
                         <div className="tl-dot tl-dot-blue">{actionLabel(w.action)}</div>
                         <div>
-                          <div className="tl-title">{w.action}</div>
+                          <div className="tl-title">{translateStatus(w.action, t)}</div>
                           <div className="tl-meta">{w.actor_name} · {fmtDate(w.created_at)}</div>
                           {w.comment && <div className="tl-comment">{w.comment}</div>}
                         </div>
@@ -286,7 +290,7 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
                 {/* Tab 2: Attachments */}
                 <div id="dtab3" className={`tab-content${activeTab===2?' active':''}`} style={{ display:activeTab===2?'block':'none' }}>
                   {!(idea.attachments||[]).length
-                    ? <div className="empty-state">No attachments.</div>
+                    ? <div className="empty-state">{t('detail.no_attachments')}</div>
                     : (idea.attachments||[]).map((a, i) => {
                       const url     = attachmentBaseUrl + a.filepath;
                       const ext     = a.filename.split('.').pop().toLowerCase();
@@ -298,7 +302,7 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
                               <span style={{ fontSize:12,color:'var(--subtle)',textTransform:'uppercase',marginRight:6 }}>{a.section}</span>
                               <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:13,color:'#374151' }}>{a.filename}</a>
                             </div>
-                            <a href={url} download={a.filename} className="btn btn-outline btn-sm">Download</a>
+                            <a href={url} download={a.filename} className="btn btn-outline btn-sm">{t('btn.download')}</a>
                           </div>
                           {isImage && (
                             <div style={{ marginTop:8 }}>
@@ -347,7 +351,7 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
   );
 }
 
-function StarWidget({ ideaId, userRating, onRate }) {
+function StarWidget({ ideaId, userRating, onRate, t }) {
   const [hover, setHover] = useState(0);
   return (
     <div style={{ display:'flex',gap:4,cursor:'pointer' }}>
@@ -359,7 +363,7 @@ function StarWidget({ ideaId, userRating, onRate }) {
           style={{ fontSize:22,color:(hover||userRating)>=s?'#f59e0b':'#d1d5db',transition:'color .1s' }}
         >★</span>
       ))}
-      {userRating && <span style={{ fontSize:12,color:'var(--subtle)',marginLeft:6,lineHeight:'26px' }}>Your rating: {userRating}/5</span>}
+      {userRating && <span style={{ fontSize:12,color:'var(--subtle)',marginLeft:6,lineHeight:'26px' }}>{t('community.your_rating')}: {userRating}/5</span>}
     </div>
   );
 }

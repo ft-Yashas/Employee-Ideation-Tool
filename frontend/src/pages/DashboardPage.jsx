@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LangContext';
 import { ideasApi } from '../services/api';
-import { animateCounter, actionLabel, statusBadge, timeAgo, isPrivileged } from '../utils/helpers';
+import { animateCounter, actionLabel, timeAgo, isPrivileged, translateStatus } from '../utils/helpers';
 
 const STATUS_COLORS = {
   'Submitted':'#374151','Under Review':'#f59e0b','Approved':'#10b981',
@@ -137,7 +137,7 @@ export default function DashboardPage() {
           <div className="bar-chart" id="dash-status-chart">
             {Object.entries(counts).map(([s, c]) => (
               <div className="bar-row" key={s}>
-                <span className="bar-label">{t(`status.${s.toLowerCase().replace(/ /g,'_')}`) || s}</span>
+                <span className="bar-label">{translateStatus(s, t)}</span>
                 <div className="bar-track">
                   <div className="bar-fill" style={{ width:'0%',background:STATUS_COLORS[s]||'#ccc' }} data-w={Math.round(c/maxCount*100)}></div>
                 </div>
@@ -157,7 +157,7 @@ export default function DashboardPage() {
                 <div className="tl-item" key={i}>
                   <div className="tl-dot tl-dot-blue">{actionLabel(r.action)}</div>
                   <div>
-                    <div className="tl-title">{r.idea_code} — {r.action}</div>
+                    <div className="tl-title">{r.idea_code} — {translateStatus(r.action, t)}</div>
                     <div className="tl-meta">{r.actor_name} · {timeAgo(r.created_at, t)}</div>
                     {r.comment && <div className="tl-comment">{r.comment}</div>}
                   </div>

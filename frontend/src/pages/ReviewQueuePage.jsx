@@ -9,12 +9,12 @@ import ReviewActionModal from '../components/ReviewActionModal';
 import AssignReviewersModal from '../components/AssignReviewersModal';
 import ReviewerDecisionModal from '../components/ReviewerDecisionModal';
 
-function EngBadge({ aiScore, avgRating, voteCount }) {
+function EngBadge({ aiScore, avgRating, voteCount, t }) {
   const ei = engagementIndex(aiScore, avgRating, voteCount);
   if (!aiScore && !voteCount) return null;
-  const tier = ei >= 70 ? { bg:'#bbf7d0',color:'#065f46',lbl:'High' }
-             : ei >= 40 ? { bg:'#fef3c7',color:'#92400e',lbl:'Med'  }
-             : { bg:'#fee2e2',color:'#991b1b',lbl:'Low' };
+  const tier = ei >= 70 ? { bg:'#bbf7d0',color:'#065f46',lbl:t('eng.high') }
+             : ei >= 40 ? { bg:'#fef3c7',color:'#92400e',lbl:t('eng.med')  }
+             : { bg:'#fee2e2',color:'#991b1b',lbl:t('eng.low') };
   return <span style={{ fontSize:10,fontWeight:700,padding:'2px 6px',borderRadius:20,background:tier.bg,color:tier.color,border:`1px solid ${tier.bg}` }}>EI:{ei} {tier.lbl}</span>;
 }
 
@@ -43,7 +43,7 @@ export default function ReviewQueuePage() {
     try {
       const res = await ideasApi.reviewQueue();
       if (res.data.success) { setIdeas(res.data.ideas || []); setSelected(new Set()); }
-      else setError(res.data.error || 'Error loading review queue.');
+      else setError(res.data.error || t('msg.fail_queue'));
     } catch { setError(t('msg.fail_queue')); }
     setLoading(false);
   }
@@ -71,16 +71,17 @@ export default function ReviewQueuePage() {
   async function submitBulk(decision) {
     if (!selected.size) return;
     const ids     = [...selected];
-    const comment = decision === 'Rejected' ? (prompt('Rejection reason (optional):') || '') : '';
-    if (!confirm(`${decision} ${ids.length} idea(s)?`)) return;
+    const comment = decision === 'Rejected' ? (prompt(t('bulk.reject_reason')) || '') : '';
+    const action  = decision === 'Rejected' ? t('review.reject') : t('review.approve');
+    if (!confirm(t('bulk.confirm', { action, n: ids.length }))) return;
     try {
       const res = await ideasApi.bulkReview({ idea_ids: ids, decision, comment });
       if (res.data.success) {
-        showToast(`${res.data.processed} idea(s) ${decision.toLowerCase()}d.`, 'success');
+        showToast(t('bulk.done', { n: res.data.processed }), 'success');
         setSelected(new Set()); setSelectAll(false);
         load();
-      } else showToast(res.data.error || 'Error', 'danger');
-    } catch { showToast('Network error', 'danger'); }
+      } else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch { showToast(t('msg.network_error'), 'danger'); }
   }
 
   return (
@@ -93,13 +94,13 @@ export default function ReviewQueuePage() {
           background:'var(--sidebar-bg)',color:'#fff',
           padding:'12px 20px',borderRadius:12,boxShadow:'0 4px 24px rgba(0,0,0,.3)',zIndex:999
         }}>
-          <span id="bulk-count-label">{selected.size} idea{selected.size>1?'s':''} selected</span>
+          <span id="bulk-count-label">{t('review.selected_count', { n: selected.size })}</span>
           <button className="btn btn-sm" style={{ background:'#10b981',color:'#fff',border:'none' }}
-            onClick={() => submitBulk('Approved')}>Approve All</button>
+            onClick={() => submitBulk('Approved')}>{t('bulk.approve_all')}</button>
           <button className="btn btn-sm" style={{ background:'#ef4444',color:'#fff',border:'none' }}
-            onClick={() => submitBulk('Rejected')}>Reject All</button>
+            onClick={() => submitBulk('Rejected')}>{t('bulk.reject_all')}</button>
           <button className="btn btn-sm btn-outline" style={{ color:'#fff',borderColor:'#ffffff66' }}
-            onClick={() => { setSelected(new Set()); setSelectAll(false); }}>Clear</button>
+            onClick={() => { setSelected(new Set()); setSelectAll(false); }}>{t('bulk.clear')}</button>
         </div>
       )}
 
@@ -108,7 +109,7 @@ export default function ReviewQueuePage() {
         <input type="checkbox" id="bulk-select-all" checked={selectAll} style={{ accentColor:'var(--primary)' }}
           onChange={e => handleSelectAll(e.target.checked)} />
         <label htmlFor="bulk-select-all" style={{ fontSize:13,color:'var(--subtle)',cursor:'pointer' }}>
-          Select all eligible
+          {t('review.select_all')}
         </label>
       </div>
 
@@ -148,7 +149,7 @@ export default function ReviewQueuePage() {
               </div>
 
               <div className="idea-card-meta">
-                By {i.submitter_name} · {i.department||'–'} · {i.submitted_at ? fmtDate(i.submitted_at) : '–'}
+                {t('detail.submitted_by')}: {i.submitter_name} · {i.department||'–'} · {i.submitted_at ? fmtDate(i.submitted_at) : '–'}
               </div>
 
               {(dueDate || parseInt(i.escalation_level) > 0) && (
@@ -158,7 +159,7 @@ export default function ReviewQueuePage() {
                       border:`1px solid ${isOverdue?'#fecaca':'#e2e8f0'}`,
                       background:isOverdue?'#fee2e2':'var(--chip-bg)',
                       color:isOverdue?'#ef4444':'var(--text-muted)' }}>
-                      {isOverdue?'⚠ Overdue':'⏱ Due'} {fmtDate(i.review_due_date)}
+                      {isOverdue ? `⚠ ${t('review.overdue')}` : `⏱ ${t('review.due')}`} {fmtDate(i.review_due_date)}
                     </span>
                   )}
                   {parseInt(i.escalation_level) > 0 && (
@@ -198,18 +199,18 @@ export default function ReviewQueuePage() {
                   <span className={`badge ${impactBadge(i.impact_level)}`}>
                     {translateImpact(i.impact_level,t)||'–'} {t('idea.impact_suffix')}
                   </span>
-                  <EngBadge aiScore={i.ai_score} avgRating={i.avg_rating} voteCount={i.vote_count} />
+                  <EngBadge aiScore={i.ai_score} avgRating={i.avg_rating} voteCount={i.vote_count} t={t} />
                 </div>
                 <div style={{ display:'flex',gap:8,alignItems:'center' }}>
                   {isSelf && (
                     <>
                       <span style={{ fontSize:11,color:'#f59e0b' }}>{t('review.own_idea')}</span>
-                      <button className="btn btn-outline btn-sm" onClick={() => setOpenDetailId(i.id)}>{t('idea.view')}</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => setOpenDetailId(i.id)}>{t('btn.view')}</button>
                     </>
                   )}
                   {!isSelf && isMultiRv && isMyPending && (
                     <>
-                      <button className="btn btn-outline btn-sm" onClick={() => setOpenDetailId(i.id)}>{t('idea.view')}</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => setOpenDetailId(i.id)}>{t('btn.view')}</button>
                       <button className="btn btn-primary btn-sm" onClick={() => { setOpenRvDecId(i.id); setOpenRvDecCode(i.idea_code); }}>{t('review.my_review')}</button>
                     </>
                   )}

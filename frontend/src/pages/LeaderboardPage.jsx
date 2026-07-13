@@ -11,12 +11,12 @@ const PERIODS = [
   { val:'yearly',    label:'lb.yearly' },
 ];
 
-function EngBadge({ aiScore, avgRating, voteCount }) {
+function EngBadge({ aiScore, avgRating, voteCount, t }) {
   const ei = engagementIndex(aiScore, avgRating, voteCount);
   if (!aiScore && !voteCount) return null;
-  const tier = ei >= 70 ? { bg:'#bbf7d0',color:'#065f46',lbl:'High' }
-             : ei >= 40 ? { bg:'#fef3c7',color:'#92400e',lbl:'Med'  }
-             : { bg:'#fee2e2',color:'#991b1b',lbl:'Low' };
+  const tier = ei >= 70 ? { bg:'#bbf7d0',color:'#065f46',lbl:t('eng.high') }
+             : ei >= 40 ? { bg:'#fef3c7',color:'#92400e',lbl:t('eng.med')  }
+             : { bg:'#fee2e2',color:'#991b1b',lbl:t('eng.low') };
   return (
     <span style={{ fontSize:10,fontWeight:700,padding:'2px 6px',borderRadius:20,background:tier.bg,color:tier.color,border:`1px solid ${tier.bg}`,display:'inline-block' }}>
       EI:{ei} {tier.lbl}
@@ -113,15 +113,15 @@ export default function LeaderboardPage() {
                         )}
                       </div>
                       <div style={{ textAlign:'right' }}>
-                        <div className="lb-points">{u.points} {t('lb.points')}</div>
-                        <div className="lb-ideas">{u.idea_count||0} {t('lb.ideas')}</div>
+                        <div className="lb-points">{u.points} {t('unit.pts')}</div>
+                        <div className="lb-ideas">{u.idea_count||0} {t('unit.ideas')}</div>
                         {u.avg_score > 0 && (
                           <span className={`${scoreBadgeClass(u.avg_score)}`} style={{ marginTop:2,display:'inline-block' }}>
                             {t('lb.avg_score')}: {u.avg_score}
                           </span>
                         )}
                         <div style={{ marginTop:4 }}>
-                          <EngBadge aiScore={u.avg_score} avgRating={u.avg_community_rating} voteCount={u.total_votes_received} />
+                          <EngBadge aiScore={u.avg_score} avgRating={u.avg_community_rating} voteCount={u.total_votes_received} t={t} />
                         </div>
                       </div>
                     </div>

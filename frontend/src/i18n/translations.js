@@ -1,241 +1,90 @@
+import en from './en';
+import hi from './hi';
+import mr from './mr';
+import kn from './kn';
+import te from './te';
+import ta from './ta';
+import ml from './ml';
+
 export const SUPPORTED_LANGS = ['en','hi','mr','kn','te','ta','ml'];
-export const LANG_LABELS = {en:'EN',hi:'हि',mr:'म',kn:'ಕ',te:'తె',ta:'த',ml:'മ'};
-export const LANG_NAMES = {en:'English',hi:'हिंदी',mr:'मराठी',kn:'ಕನ್ನಡ',te:'తెలుగు',ta:'தமிழ்',ml:'മലയാളം'};
-
-const en = {
-  'app.name':'IdeaTool',
-  'nav.dashboard':'Dashboard','nav.my_ideas':'My Ideas','nav.submit':'Submit Idea',
-  'nav.review':'Review Queue','nav.all_ideas':'All Ideas','nav.audit':'Audit Trail',
-  'nav.leaderboard':'Leaderboard','nav.analytics':'Analytics','nav.admin':'Admin Panel',
-  'nav.super_admin':'Org Hierarchy','nav.profile':'My Profile',
-  'section.main':'Main','section.workflow':'Workflow','section.insights':'Insights',
-  'section.admin':'Admin','section.super_admin':'IFQM Super Admin',
-  'login.app_title':'Employee Ideation Tool','login.tagline':'Turn great ideas into real improvements.',
-  'login.welcome':'Welcome back','login.subtitle':'Sign in to your IFQM account to continue',
-  'login.org_code':'Organization Code','login.org_hint':'Leave blank for IFQM platform admin login',
-  'login.forgot':'Forgot your password?','login.email':'Email Address','login.password':'Password','login.btn':'Sign In',
-  'login.email_ph':'admin@yourorg.com','login.password_ph':'Enter your password',
-  'admin.add_user':'+ Add User',
-  'login.feat1_title':'Submit & Track Ideas','login.feat1_sub':'5-step wizard with AI quality scoring',
-  'login.feat2_title':'Earn Points & Rewards','login.feat2_sub':'+10 submit · +25 approved · +65 implemented',
-  'login.feat3_title':'Analytics & Leaderboard','login.feat3_sub':'Real-time insights across departments',
-  'topbar.dark':'Dark','topbar.light':'Light','topbar.notifications':'Notifications',
-  'topbar.logout':'Logout','topbar.mark_read':'Mark all read',
-  'dash.total':'Total Ideas','dash.approved':'Approved','dash.implemented':'Implemented',
-  'dash.pending_review':'Pending Review','dash.overdue_reviews':'Overdue Reviews',
-  'dash.status_dist':'Status Distribution','dash.recent':'Recent Activity',
-  'status.submitted':'Submitted','status.review':'Under Review','status.approved':'Approved',
-  'status.rejected':'Rejected','status.implemented':'Implemented','status.draft':'Draft',
-  'idea.view':'View','idea.review':'Review','idea.votes':'votes',
-  'vote.title':'Community Rating','vote.your_rating':'Your Rating',
-  'vote.avg':'Avg','vote.engagement_idx':'Engagement Index',
-  'vote.no_self':'You cannot rate your own idea','vote.submit':'Submit Rating',
-  'vote.rated':'Rated','vote.stars':'stars',
-  'lb.individual':'Individual Rankings','lb.dept':'Department Rankings',
-  'lb.top_ideas':'Top Scored Ideas','lb.points':'pts','lb.ideas':'ideas',
-  'lb.avg_score':'Avg Score','lb.engagement':'Engagement',
-  'lb.all_time':'All Time','lb.monthly':'Monthly','lb.quarterly':'Quarterly','lb.yearly':'Yearly','lb.you':'(You)',
-  'form.save_draft':'Save Draft','form.next':'Next','form.back':'Back','form.submit_idea':'Submit New Idea',
-  'detail.submitted_by':'Submitted by','detail.situation':'Present Situation',
-  'detail.solution':'Proposed Solution','detail.impact_areas':'Impact Areas',
-  'detail.impact_level':'Impact Level','detail.tangible':'Tangible Benefit',
-  'detail.intangible':'Intangible Benefit','detail.co_suggesters':'Co-Suggesters',
-  'detail.ai_eval':'AI Evaluation','detail.score':'Score','detail.close':'Close',
-  'profile.title':'Employee Profile','profile.stats':'My Stats',
-  'profile.dept':'Department','profile.email_lbl':'Email','profile.phone':'Phone',
-  'profile.reports_to':'Reporting To','profile.bu':'Business Unit','profile.loc':'Location',
-  'profile.hr_note':'Auto-fetched from HR Database. Contact Admin to update.',
-  'profile.total_pts':'Total Points',
-  'btn.new_idea':'New Idea','btn.close':'Close','btn.cancel':'Cancel',
-  'btn.submit_decision':'Submit Decision','btn.view_my_ideas':'View My Ideas',
-  'btn.rescore_all':'Rescore All Ideas','btn.back_tenants':'← All Tenants',
-  'page.my_ideas_sub':'Track all ideas you have submitted',
-  'placeholder.search_ideas':'Search ideas...','filter.all_status':'All Status',
-  'page.submit_sub':'Fill in all steps to submit your improvement idea',
-  'wizard.step1':'Situation','wizard.step2':'Solution','wizard.step3':'Impact',
-  'wizard.step4':'Co-Suggesters','wizard.step5':'Review & Submit',
-  'step1.heading':'Step 1: Describe the Present Situation',
-  'step1.title_label':'Situation Title','step1.title_ph':'Brief title for your idea',
-  'step1.desc_label':'Current Situation Description',
-  'step1.desc_ph':'Describe the current problem or inefficiency in detail (min. 50 chars)…',
-  'step1.doc_label':'Supporting Document (Optional)',
-  'step1.upload':'Click to upload or drag & drop','step1.upload_types':'PDF, PNG, JPG, XLSX — Max 10 MB',
-  'step2.heading':'Step 2: Proposed Idea / Solution',
-  'step2.label':'Proposed Solution','step2.ph':'Describe your proposed improvement in detail…',
-  'step3.heading':'Step 3: Impact Areas & Measurable Benefits',
-  'step3.impact_label':'Select Impact Areas','step3.impact_sub':'(select all that apply)',
-  'step3.level':'Overall Impact Level',
-  'step3.tangible_label':'Tangible Benefit (Optional)','step3.tangible_ph':'e.g. Rs. 50,000 savings/year',
-  'step3.intangible_label':'Intangible Benefits (Optional)',
-  'step3.intangible_ph':'e.g. Improved worker confidence, better audit scores',
-  'step4.heading':'Step 4: Co-Suggesters (Optional, max 2)',
-  'step4.co1':'Co-Suggester 1','step4.co2':'Co-Suggester 2','step4.co_ph':'Search by name or employee ID…',
-  'step5.heading':'Step 5: Review & Submit',
-  'step5.note':'By submitting, you confirm this idea is original. You will earn +10 points on submission. An AI quality score will be automatically computed.',
-  'impact.production':'Production','impact.quality':'Quality','impact.cost':'Cost',
-  'impact.delivery':'Delivery','impact.safety':'Safety','impact.environment':'Environment',
-  'impact.morale':'Morale','impact.low':'Low','impact.medium':'Medium','impact.high':'High',
-  'page.review_sub':'Ideas pending your review — sorted by AI quality score (highest first)',
-  'placeholder.search':'Search…','filter.all_impact':'All Impact',
-  'table.idea_id':'Idea ID','table.title':'Title','table.submitted_by':'Submitted By',
-  'table.dept':'Department','table.impact':'Impact','table.ai_score':'AI Score',
-  'table.engagement':'Engagement','table.status':'Status','table.date':'Date','table.action':'Action',
-  'table.timestamp':'Timestamp','table.actor':'Actor','table.comment_col':'Comment',
-  'table.event':'Event','table.pts_awarded':'Points Awarded',
-  'table.employee':'Employee','table.emp_id':'ID','table.role':'Role',
-  'table.bu':'Business Unit','table.email_col':'Email',
-  'table.reports_to':'Reports To','table.points_col':'Points','table.ideas_col':'Ideas',
-  'page.audit_title':'System Audit Trail',
-  'page.audit_sub':'Immutable append-only log of all workflow actions',
-  'audit.proof':'This log is append-only and tamper-proof. No record can be edited or deleted.',
-  'modal.details':'Details','modal.timeline':'Timeline','modal.attachments':'Attachments',
-  'review.decision':'Decision','review.comment_label':'Comment / Feedback',
-  'review.comment_ph':'Optional comments for the submitter…',
-  'review.to_review':'Move to Under Review','review.approve':'Approve',
-  'review.reject':'Reject','review.implement':'Mark as Implemented',
-  'bulk.approve_all':'Approve All','bulk.reject_all':'Reject All','bulk.clear':'Clear',
-  'admin.tab_overview':'Overview','admin.tab_ideas':'Idea Management',
-  'admin.tab_users':'User List','admin.tab_system':'System',
-  'admin.points_config':'Points Configuration',
-  'admin.event_sub':'Idea Submitted','admin.event_app':'Idea Approved','admin.event_impl':'Idea Implemented',
-  'admin.db_status':'HR Database Sync Status',
-  'admin.rescore_desc':'Recompute AI quality scores for all existing ideas using the current scoring model.',
-  'sa.console':'Command Center','sa.signed_in':'Signed in as',
-  'sa.tab_overview':'Overview','sa.tab_hierarchy':'Org Hierarchy',
-  'sa.tab_users':'User Management','sa.tab_system':'System',
-  'sa.status_dist':'Idea Status Distribution','sa.recent':'Recent Activity',
-  'sa.org_tree':'Organization Tree — Admin → Manager → Employee',
-  'sa.all_employees':'All Employees','sa.points_config':'Points Configuration',
-  'sa.ai_engine':'AI Scoring Engine',
-  'sa.ai_desc':'Recompute AI quality scores for all existing ideas using the current scoring model. Use this after importing legacy data or after updating the scoring algorithm.',
-  'sa.db_sync':'Database & HR Sync',
-  'placeholder.search_user':'Search by name, email or ID…',
-  'pa.overview':'Platform Overview','pa.private':'Aggregate metrics only — tenant content is private',
-  'pa.signed_in':'Signed in as','pa.all_tenants':'All Tenants — Aggregate Stats',
-  'pa.tenant_hierarchy':'Tenant Hierarchy',
-  'pa.hierarchy_sub':'Org structure — names, roles, departments only. No idea content.',
-  'pa.user_hierarchy':'User Hierarchy',
-  'msg.loading':'Loading…','msg.no_ideas':'No ideas found. Submit your first idea!',
-  'msg.no_review':'No ideas pending review.','msg.no_audit':'No audit records.',
-  'msg.no_leaderboard':'No scored ideas yet. Submit ideas to see rankings.',
-  'msg.no_notif':'No notifications','msg.draft_prefix':'Draft saved! Idea code: ',
-  'msg.fill_situation':'Please fill in the title and situation description (min 20 chars).',
-  'msg.fill_solution':'Please fill in the proposed solution.',
-  'msg.server_error':'Server error. Please try again.',
-  'msg.fail_dashboard':'Failed to load dashboard. Is the server running?',
-  'msg.fail_ideas':'Failed to load ideas. Check server.',
-  'msg.fail_queue':'Failed to load review queue. Check server connection.',
-  'msg.fail_audit':'Failed to load. Check server connection.',
-  'msg.fail_leaderboard':'Failed to load leaderboard.',
-  'msg.fail_analytics':'Failed to load analytics. Check server connection.',
-  'msg.audit_restricted':'Audit Trail is only available to Managers, Admins and Executives.',
-  'msg.analytics_restricted':'Analytics is only available to Managers, Admins and Executives.',
-  'msg.decision_ok':'Decision Submitted','msg.idea_ok':'Idea Submitted Successfully',
-  'pa.active_tenants':'Active Tenants','pa.total_users':'Total Users','pa.ideas_submitted':'Ideas Submitted',
-  'msg.rescoring':'Rescoring…',
-  'analytics.approval_rate':'Approval Rate','analytics.impl_rate':'Implementation Rate',
-  'analytics.avg_score':'Avg AI Quality Score',
-  'page.leaderboard_title':'Leaderboard & Gamification','page.analytics_title':'Analytics Dashboard',
-  'analytics.impact_dist':'Impact Area Distribution','analytics.status_summary':'Status Summary',
-  'analytics.monthly_trend':'Monthly Submission Trend','analytics.score_dist':'AI Quality Score Distribution',
-  'analytics.high':'High (75+)','analytics.med':'Med (50-74)','analytics.low_score':'Low (<50)',
-  'analytics.avg_note':'Overall average AI score:',
-  'detail.not_scored':'Not scored','detail.no_ai':'No AI evaluation available.',
-  'community.title':'Community Vote & Score','community.upvotes':'Upvotes',
-  'community.downvotes':'Downvotes','community.net':'Net Score','community.score':'Community Score',
-  'community.your_votes':'Community votes on your idea:','community.vote_on':'Vote on this idea:',
-  'community.vote_hint':'Click ▲ or ▼ · Click again to remove your vote',
-  'review.own_idea':'Your own idea','review.vote_needed':'Your vote needed',
-  'review.committee_badge':'Committee','review.route_committee':'Route to Committee',
-  'review.submit_mine':'Submit My Review','review.decide':'Review / Decide',
-  'review.cannot_own':'You cannot review your own idea',
-  'preview.title_label':'Title','preview.situation':'Situation','preview.solution':'Solution',
-  'preview.impact_areas':'Impact Areas','preview.impact_level':'Impact Level',
-  'preview.co_suggesters':'Co-Suggesters','preview.none_selected':'None selected',
-  'platform.users':'Users','platform.ideas':'Ideas','platform.implemented':'Implemented',
-  'platform.last_activity':'Last activity','platform.active':'Active',
-  'platform.db_error':'DB unreachable','platform.view_org':'View Org',
-  'platform.admins':'Admins','platform.executives':'Executives',
-  'platform.managers':'Managers','platform.employees':'Employees',
-  'platform.reports_to':'Reports to:',
-  'sa.subtitle':'Complete organizational control & oversight across all levels',
-  'sa.last_refreshed':'Last refreshed:','sa.executives':'Executives',
-  'admin.points_info':'Points config (stored in config). Restart needed to apply changes.',
-  'admin.hr_info':'Employee data is loaded from the users table. Run the SQL seed script to populate.',
-  'admin.rescore_info':'Recompute AI quality scores for all existing ideas using the current scoring model.',
-  'notif.header':'Notifications','idea.impact_suffix':'Impact',
-  'time.just_now':'Just now','time.min_ago':' min ago','time.hr_ago':'h ago','time.day_ago':'d ago',
-  'ar.title':'Route to Committee','ar.search_add':'Search & Add Reviewers',
-  'ar.no_reviewers':'No reviewers added yet.','ar.threshold':'Approval Threshold',
-  'ar.unanimous':'All reviewers must approve (unanimous)',
-  'ar.supermajority':'Supermajority — at least 2/3 must approve',
-  'ar.simple_majority':'Simple majority — more than half must approve',
-  'ar.info':'Idea moves to Under Review. All assigned reviewers will be notified immediately.',
-  'rd.title':'My Review','rd.decision':'Your Decision',
-  'rd.approve_btn':'✓ Approve','rd.reject_btn':'✗ Reject',
-  'rd.feedback':'Feedback / Comment','rd.feedback_ph':'Share your reasoning with the submitter…',
-  'init.hr_banner':'Auto-fetched from HR Database:','init.reporting_to':'Reporting to:',
-  'attach.prefix':'Attached: ',
-  'committee.approved_count':'approved','committee.rejected_count':'rejected',
-  'committee.pending_count':'pending','committee.approval_req':'% approval required',
-  'review.my_review':'My Review','review.view_details':'View Details','review.review_btn':'Review',
-  'rescore.ok':'Rescored {n} ideas successfully.',
-  'challenges.title':'Innovation Challenges','challenges.active':'Active','challenges.inactive':'Inactive',
-  'challenges.new':'+ New Challenge','challenges.deadline':'Deadline',
-  'challenges.no_challenges':'No challenges found.',
-  'board.title':'Community Idea Board','board.vote_hint':'▲ / ▼ to vote',
-  'lb.all':'All Time','lb.top_employees':'Top Employees','lb.by_dept':'By Department',
-  'filter.search_placeholder':'Search ideas…','filter.all_statuses':'All Statuses',
-  'table.submitter':'Submitted By','table.idea':'Idea','table.comment':'Comment',
-  'btn.back':'Back','btn.next':'Next',
-  'review.decision_label':'Decision',
+export const LANG_LABELS = { en:'EN', hi:'हि', mr:'म', kn:'ಕ', te:'తె', ta:'த', ml:'മ' };
+export const LANG_NAMES  = {
+  en:'English', hi:'हिंदी', mr:'मराठी', kn:'ಕನ್ನಡ',
+  te:'తెలుగు', ta:'தமிழ்', ml:'മലയാളം',
 };
 
-const hi = {
-  'app.name':'आइडियाटूल',
-  'nav.dashboard':'डैशबोर्ड','nav.my_ideas':'मेरे विचार','nav.submit':'विचार प्रस्तुत करें',
-  'nav.review':'समीक्षा सूची','nav.all_ideas':'सभी विचार','nav.audit':'ऑडिट ट्रेल',
-  'nav.leaderboard':'लीडरबोर्ड','nav.analytics':'विश्लेषण','nav.admin':'एडमिन पैनल',
-  'nav.super_admin':'संगठन संरचना','nav.profile':'मेरी प्रोफ़ाइल',
-  'section.main':'मुख्य','section.workflow':'वर्कफ़्लो','section.insights':'अंतर्दृष्टि',
-  'section.admin':'एडमिन','section.super_admin':'IFQM सुपर एडमिन',
-  'login.app_title':'कर्मचारी विचार मंच','login.tagline':'महान विचारों को वास्तविक सुधारों में बदलें।',
-  'login.welcome':'वापस स्वागत है','login.subtitle':'जारी रखने के लिए अपने IFQM खाते में साइन इन करें',
-  'login.org_code':'संगठन कोड','login.org_hint':'IFQM प्लेटफ़ॉर्म एडमिन के लिए खाली छोड़ें',
-  'login.forgot':'अपना पासवर्ड भूल गए?','login.email':'ईमेल पता','login.password':'पासवर्ड','login.btn':'साइन इन करें',
-  'login.email_ph':'आपका.नाम@jain.com','login.password_ph':'अपना पासवर्ड दर्ज करें',
-  'login.feat1_title':'विचार सबमिट और ट्रैक करें','login.feat1_sub':'एआई स्कोरिंग सहित 5-चरण विज़ार्ड',
-  'login.feat2_title':'अंक और पुरस्कार अर्जित करें','login.feat2_sub':'+10 सबमिट · +25 स्वीकृत · +65 लागू',
-  'login.feat3_title':'विश्लेषण और लीडरबोर्ड','login.feat3_sub':'विभागों में रीयल-टाइम जानकारी',
-  'topbar.dark':'डार्क','topbar.light':'लाइट','topbar.notifications':'सूचनाएं',
-  'topbar.logout':'लॉगआउट','topbar.mark_read':'सभी पढ़ा हुआ चिह्नित करें',
-  'dash.total':'कुल विचार','dash.approved':'स्वीकृत','dash.implemented':'लागू किए गए',
-  'dash.pending_review':'लंबित समीक्षा','dash.overdue_reviews':'अतिदेय समीक्षाएं',
-  'dash.status_dist':'स्थिति वितरण','dash.recent':'हालिया गतिविधि',
-  'status.submitted':'सबमिट किया गया','status.review':'समीक्षाधीन','status.approved':'स्वीकृत',
-  'status.rejected':'अस्वीकृत','status.implemented':'लागू किया गया','status.draft':'मसौदा',
-  'msg.loading':'लोड हो रहा है…','msg.no_ideas':'कोई विचार नहीं मिला।',
-  'msg.no_review':'समीक्षा के लिए कोई विचार लंबित नहीं।','msg.no_audit':'कोई ऑडिट रिकॉर्ड नहीं।',
-  'msg.no_leaderboard':'अभी तक कोई स्कोर नहीं।',
-  'msg.no_notif':'कोई सूचना नहीं',
-  'form.save_draft':'मसौदा सहेजें','form.next':'अगला','form.back':'वापस','form.submit_idea':'नया विचार सबमिट करें',
-  'btn.new_idea':'नया विचार','btn.close':'बंद करें','btn.cancel':'रद्द करें',
-  'btn.submit_decision':'निर्णय सबमिट करें',
-  'btn.back':'वापस','btn.next':'अगला',
-  'review.approve':'स्वीकृत करें','review.reject':'अस्वीकार करें',
-  'review.decide':'समीक्षा / निर्णय','review.decision_label':'निर्णय',
-  'notif.header':'सूचनाएं',
-  'topbar.logout':'लॉगआउट',
-  'admin.add_user':'+ उपयोगकर्ता जोड़ें',
-  'idea.view':'देखें','idea.votes':'वोट',
-  'lb.all':'सभी समय','lb.top_employees':'शीर्ष कर्मचारी','lb.by_dept':'विभाग द्वारा',
-  'filter.search_placeholder':'विचार खोजें…','filter.all_statuses':'सभी स्थितियाँ',
-  'table.submitter':'प्रस्तुतकर्ता','table.idea':'विचार','table.comment':'टिप्पणी',
+export const TRANSLATIONS = { en, hi, mr, kn, te, ta, ml };
+
+// Values stored in the DB are English; these map them onto translation keys so
+// status/impact/area/role columns render in the active language too.
+export const STATUS_KEYS = {
+  'Submitted':'status.submitted',
+  'Under Review':'status.review',
+  'Approved':'status.approved',
+  'Rejected':'status.rejected',
+  'Implemented':'status.implemented',
+  'Draft':'status.draft',
+  'Escalated':'status.escalated',
+  'Comment':'status.comment',
+};
+export const IMPACT_KEYS = {
+  'Low':'impact.low', 'Medium':'impact.medium',
+  'High':'impact.high', 'Critical':'impact.critical',
+};
+export const AREA_KEYS = {
+  'Cost Reduction':'area.cost_reduction',
+  'Quality Improvement':'area.quality_improvement',
+  'Safety':'area.safety',
+  'Productivity':'area.productivity',
+  'Customer Satisfaction':'area.customer_satisfaction',
+  'Process Efficiency':'area.process_efficiency',
+  'Innovation':'area.innovation',
+};
+export const ROLE_KEYS = {
+  trainee:'role.trainee', employee:'role.employee', team_lead:'role.team_lead',
+  project_lead:'role.project_lead', manager:'role.manager',
+  senior_manager:'role.senior_manager', executive:'role.executive',
+  admin:'role.admin', super_admin:'role.super_admin', platform_admin:'role.platform_admin',
 };
 
-export const TRANSLATIONS = { en, hi, mr: hi, kn: en, te: en, ta: en, ml: en };
+// Substitute {name} placeholders: t('msg.pts_earned', { n: 10 })
+function interpolate(str, vars) {
+  if (!vars) return str;
+  return str.replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined ? String(vars[k]) : m));
+}
+
+const warned = new Set();
 
 export function getT(lang) {
-  const dict = TRANSLATIONS[lang] || TRANSLATIONS.en;
-  return (key) => dict[key] ?? TRANSLATIONS.en[key] ?? key;
+  const dict = TRANSLATIONS[lang] || en;
+  return (key, vars) => {
+    let s = dict[key];
+    if (s === undefined) {
+      s = en[key];
+      if (import.meta.env.DEV && !warned.has(lang + key)) {
+        warned.add(lang + key);
+        console.warn(
+          s === undefined
+            ? `[i18n] Key "${key}" is missing from every locale — the raw key will render on screen.`
+            : `[i18n] Key "${key}" is missing from "${lang}" — falling back to English.`
+        );
+      }
+    }
+    // Last resort: show the key rather than "undefined".
+    return interpolate(s ?? key, vars);
+  };
+}
+
+// Dev-only completeness audit. A locale that drifts from `en` used to fail
+// silently as half-English UI; now it is reported the moment the app boots.
+if (import.meta.env.DEV) {
+  const enKeys = Object.keys(en);
+  for (const lang of SUPPORTED_LANGS) {
+    if (lang === 'en') continue;
+    const dict = TRANSLATIONS[lang];
+    const missing = enKeys.filter(k => dict[k] === undefined);
+    const extra   = Object.keys(dict).filter(k => en[k] === undefined);
+    if (missing.length) console.warn(`[i18n] "${lang}" is missing ${missing.length}/${enKeys.length} keys:`, missing);
+    if (extra.length)   console.warn(`[i18n] "${lang}" has ${extra.length} keys not present in en:`, extra);
+  }
 }

@@ -10,16 +10,18 @@ export default function ReviewerDecisionModal({ ideaId, ideaCode, onClose }) {
   const [comment,  setComment]  = useState('');
   const [loading,  setLoading]  = useState(false);
 
+  const decisionLabel = () => t(decision === 'approved' ? 'review.approve' : 'review.reject');
+
   async function handleSubmit() {
-    if (!confirm(`Submit your decision: ${decision} for idea #${ideaCode}?`)) return;
+    if (!confirm(t('rd.confirm', { decision: decisionLabel(), code: ideaCode }))) return;
     setLoading(true);
     try {
       const res = await ideasApi.reviewerDecision({ idea_id: ideaId, decision, comment });
       if (res.data.success) {
-        showToast(`Your decision (${decision}) recorded.${res.data.final_decision ? ` Idea ${res.data.final_decision} — committee complete.` : ''}`, 'success');
+        showToast(t('rd.recorded', { decision: decisionLabel() }), 'success');
         onClose();
-      } else showToast(res.data.error || 'Failed to record decision.', 'danger');
-    } catch { showToast('Server error.', 'danger'); }
+      } else showToast(res.data.error || t('msg.server_error'), 'danger');
+    } catch { showToast(t('msg.server_error'), 'danger'); }
     setLoading(false);
   }
 
@@ -32,24 +34,24 @@ export default function ReviewerDecisionModal({ ideaId, ideaCode, onClose }) {
         </div>
         <div className="modal-body">
           <div style={{ fontSize:13,color:'var(--subtle)',marginBottom:14 }}>
-            You have been assigned as a reviewer for this idea. Submit your individual decision:
+            {t('rd.intro')}
           </div>
           <div className="form-group">
-            <label>Your Decision</label>
+            <label>{t('rd.decision')}</label>
             <select className="form-control" value={decision} onChange={e => setDecision(e.target.value)}>
-              <option value="approved">Approve</option>
-              <option value="rejected">Reject</option>
+              <option value="approved">{t('review.approve')}</option>
+              <option value="rejected">{t('review.reject')}</option>
             </select>
           </div>
           <div className="form-group">
-            <label>Comments (optional)</label>
+            <label>{t('rd.feedback')}</label>
             <textarea className="form-control" rows="4" value={comment}
               onChange={e => setComment(e.target.value)}
-              placeholder="Provide your reasoning or feedback…" />
+              placeholder={t('rd.feedback_ph')} />
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn btn-outline" onClick={onClose}>{t('btn.cancel')}</button>
           <button className="btn btn-primary" disabled={loading} onClick={handleSubmit}>
             {loading ? t('msg.loading') : t('review.submit_mine')}
           </button>

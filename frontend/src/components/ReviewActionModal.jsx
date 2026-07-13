@@ -10,14 +10,16 @@ export default function ReviewActionModal({ ideaId, ideaCode, onClose }) {
   const [comment,  setComment]  = useState('');
   const [loading,  setLoading]  = useState(false);
 
+  const DECISIONS = [
+    ['Approved',     'review.approve'],
+    ['Rejected',     'review.reject'],
+    ['Implemented',  'review.implement'],
+    ['Under Review', 'review.to_review'],
+  ];
+
   async function handleSubmit() {
-    const labels = {
-      'Approved':       'Approve',
-      'Rejected':       'Reject',
-      'Implemented':    'Mark as Implemented',
-      'Under Review':   'Move to Under Review',
-    };
-    if (!confirm(`Confirm: ${labels[decision]||decision} this idea?\n\nThis action will be recorded in the audit trail and the submitter will be notified.`)) return;
+    const label = DECISIONS.find(([v]) => v === decision)?.[1];
+    if (!confirm(t('review.confirm', { action: label ? t(label) : decision }))) return;
 
     setLoading(true);
     try {
@@ -25,15 +27,18 @@ export default function ReviewActionModal({ ideaId, ideaCode, onClose }) {
       if (res.data.success) {
         const d = res.data;
         const isEsc = d.decision === 'Escalated';
+        const pts = d.points_awarded ? ` · ${t('msg.pts_earned', { n: d.points_awarded })}` : '';
         showToast(
-          isEsc ? `Escalated to ${d.escalated_to}` : `${t('msg.decision_ok')}: ${decision}${d.points_awarded ? ` · +${d.points_awarded} pts` : ''}`,
+          isEsc
+            ? `${t('status.escalated')}: ${d.escalated_to}`
+            : `${t('msg.decision_ok')}: ${t(label || 'review.decision_label')}${pts}`,
           'success'
         );
         onClose();
       } else {
-        showToast('Error: ' + (res.data.error || 'Unknown error'), 'danger');
+        showToast(`${t('msg.error')}: ` + (res.data.error || t('msg.server_error')), 'danger');
       }
-    } catch { showToast('Server error. Please try again.', 'danger'); }
+    } catch { showToast(t('msg.server_error'), 'danger'); }
     setLoading(false);
   }
 
@@ -48,10 +53,9 @@ export default function ReviewActionModal({ ideaId, ideaCode, onClose }) {
           <div className="form-group">
             <label>{t('review.decision_label')}</label>
             <select className="form-control" id="review-decision" value={decision} onChange={e => setDecision(e.target.value)}>
-              <option value="Approved">Approve</option>
-              <option value="Rejected">Reject</option>
-              <option value="Implemented">Mark as Implemented</option>
-              <option value="Under Review">Move to Under Review</option>
+              {DECISIONS.map(([val, key]) => (
+                <option key={val} value={val}>{t(key)}</option>
+              ))}
             </select>
           </div>
           <div className="form-group">
@@ -62,7 +66,7 @@ export default function ReviewActionModal({ ideaId, ideaCode, onClose }) {
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn btn-outline" onClick={onClose}>{t('btn.cancel')}</button>
           <button className="btn btn-primary" disabled={loading} onClick={handleSubmit}>
             {loading ? t('msg.loading') : t('btn.submit_decision')}
           </button>

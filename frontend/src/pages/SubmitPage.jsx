@@ -4,6 +4,7 @@ import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { ideasApi, challengesApi, uploadApi, usersApi } from '../services/api';
+import { translateStatus, translateImpact, translateArea } from '../utils/helpers';
 
 const TOTAL_STEPS = 5;
 const IMPACT_AREAS = ['Cost Reduction','Quality Improvement','Safety','Productivity','Customer Satisfaction','Process Efficiency','Innovation'];
@@ -134,7 +135,7 @@ export default function SubmitPage() {
         setDraftId(res.data.idea_id);
         showToast(`${t('msg.draft_prefix')} ${res.data.idea_code}`, 'success');
       }
-    } catch { showToast('Failed to save draft.', 'danger'); }
+    } catch { showToast(t('msg.draft_failed'), 'danger'); }
   }
 
   async function handleSubmit() {
@@ -146,14 +147,16 @@ export default function SubmitPage() {
       if (res.data.success) {
         // Upload files
         await uploadFiles(res.data.idea_id);
-        showToast(`Idea #${res.data.idea_code} submitted!${res.data.points_added>0?' +'+res.data.points_added+' pts earned':''}`, 'success');
+        const msg = t('msg.idea_ok', { code: res.data.idea_code });
+        const pts = res.data.points_added > 0 ? ' · ' + t('msg.pts_earned', { n: res.data.points_added }) : '';
+        showToast(msg + pts, 'success');
         // Reset form
         resetForm();
         navigate('/my-ideas');
       } else {
-        setError(res.data.error || 'Submission failed.');
+        setError(res.data.error || t('msg.submit_failed'));
       }
-    } catch { setError('Server error. Please try again.'); }
+    } catch { setError(t('msg.server_error')); }
     setSubmitting(false);
   }
 
@@ -209,17 +212,17 @@ export default function SubmitPage() {
                 placeholder={t('form.title_ph')} />
               {dupWarning.length > 0 && (
                 <div id="duplicate-warning" className="alert alert-warning" style={{ marginTop:6 }}>
-                  ⚠ Similar ideas already exist — please review before submitting:
+                  ⚠ {t('form.dup_warning')}
                   <ul style={{ margin:'4px 0 0 16px' }}>
                     {dupWarning.map(x => (
-                      <li key={x.id}><strong>{x.idea_code}</strong>: {x.title} <span style={{ color:'var(--text-muted)' }}>({x.status})</span></li>
+                      <li key={x.id}><strong>{x.idea_code}</strong>: {x.title} <span style={{ color:'var(--text-muted)' }}>({translateStatus(x.status, t)})</span></li>
                     ))}
                   </ul>
                 </div>
               )}
             </div>
             <div className="form-group">
-              <label>{t('form.situation')} * <span style={{ fontWeight:400,fontSize:11,color:'var(--subtle)' }}>(min. 20 chars)</span></label>
+              <label>{t('form.situation')} * <span style={{ fontWeight:400,fontSize:11,color:'var(--subtle)' }}>{t('form.min_chars')}</span></label>
               <textarea className="form-control" rows="5" value={situation}
                 onChange={e => setSituation(e.target.value)}
                 placeholder={t('form.situation_ph')} />
@@ -255,14 +258,14 @@ export default function SubmitPage() {
               <div style={{ display:'flex',flexWrap:'wrap',gap:8,marginTop:4 }}>
                 {IMPACT_AREAS.map(a => (
                   <div key={a} className={`impact-chip${impactAreas.includes(a)?' selected':''}`}
-                    data-val={a} onClick={() => toggleImpact(a)}>{a}</div>
+                    data-val={a} onClick={() => toggleImpact(a)}>{translateArea(a, t)}</div>
                 ))}
               </div>
             </div>
             <div className="form-group">
               <label>{t('form.impact_level')}</label>
               <select className="form-control" value={impactLevel} onChange={e => setImpactLevel(e.target.value)}>
-                {IMPACT_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                {IMPACT_LEVELS.map(l => <option key={l} value={l}>{translateImpact(l, t)}</option>)}
               </select>
             </div>
           </div>
@@ -283,7 +286,7 @@ export default function SubmitPage() {
                 onChange={e => setFileSol(e.target.files[0]||null)} />
               {fileSol && <div style={{ fontSize:12,color:'var(--subtle)',marginTop:4 }}>{fileSol.name}</div>}
             </div>
-            <div style={{ fontSize:12,color:'var(--subtle)' }}>Supported: PDF, Word, Excel, images. Max 10MB each.</div>
+            <div style={{ fontSize:12,color:'var(--subtle)' }}>{t('form.attach_note')}</div>
           </div>
         )}
 
@@ -295,7 +298,7 @@ export default function SubmitPage() {
               <div className="pos-rel">
                 <input className="form-control" value={co1Query}
                   onChange={e => { setCo1Query(e.target.value); setCo1Id(''); setCo1Name(''); searchUsers(e.target.value,'1'); }}
-                  placeholder="Search by name or employee ID…" />
+                  placeholder={t('form.co_search_ph')} />
                 {co1Results.length > 0 && (
                   <div className="user-search-results" style={{ display:'block' }}>
                     {co1Results.map(u => (
@@ -314,7 +317,7 @@ export default function SubmitPage() {
               <div className="pos-rel">
                 <input className="form-control" value={co2Query}
                   onChange={e => { setCo2Query(e.target.value); setCo2Id(''); setCo2Name(''); searchUsers(e.target.value,'2'); }}
-                  placeholder="Search by name or employee ID…" />
+                  placeholder={t('form.co_search_ph')} />
                 {co2Results.length > 0 && (
                   <div className="user-search-results" style={{ display:'block' }}>
                     {co2Results.map(u => (
@@ -334,7 +337,7 @@ export default function SubmitPage() {
         {/* Step 5: Review & Submit */}
         {step === 5 && (
           <div style={{ animation:'fadeInUp .25s cubic-bezier(.4,0,.2,1)' }}>
-            <div style={{ marginBottom:16,fontSize:13,fontWeight:600,color:'var(--heading)' }}>Review your idea before submitting</div>
+            <div style={{ marginBottom:16,fontSize:13,fontWeight:600,color:'var(--heading)' }}>{t('form.review_heading')}</div>
 
             <div className="form-group">
               <label>{t('preview.title_label')}</label>
@@ -351,11 +354,13 @@ export default function SubmitPage() {
             <div className="form-row">
               <div>
                 <label>{t('preview.impact_areas')}</label>
-                <div className="form-control" style={{ background:'#f8f9fe' }}>{impactAreas.join(', ') || t('preview.none_selected')}</div>
+                <div className="form-control" style={{ background:'#f8f9fe' }}>
+                  {impactAreas.map(a => translateArea(a, t)).join(', ') || t('preview.none_selected')}
+                </div>
               </div>
               <div>
                 <label>{t('preview.impact_level')}</label>
-                <div className="form-control" style={{ background:'#f8f9fe' }}>{impactLevel}</div>
+                <div className="form-control" style={{ background:'#f8f9fe' }}>{translateImpact(impactLevel, t)}</div>
               </div>
             </div>
             {co1Name && (
@@ -369,18 +374,18 @@ export default function SubmitPage() {
               <div className="form-group">
                 <label>{t('form.template')}</label>
                 <select className="form-control" value={templateType} onChange={e => setTemplateType(e.target.value)}>
-                  <option value="">— No Template —</option>
-                  <option value="cost">Cost Reduction</option>
-                  <option value="quality">Quality Improvement</option>
-                  <option value="safety">Safety Enhancement</option>
-                  <option value="process">Process Optimization</option>
+                  <option value="">{t('form.no_template')}</option>
+                  <option value="cost">{t('form.tpl_cost')}</option>
+                  <option value="quality">{t('form.tpl_quality')}</option>
+                  <option value="safety">{t('form.tpl_safety')}</option>
+                  <option value="process">{t('form.tpl_process')}</option>
                 </select>
               </div>
               {challenges.length > 0 && (
                 <div className="form-group">
                   <label>{t('form.challenge')}</label>
                   <select className="form-control" id="idea-challenge" value={challengeId} onChange={e => setChallengeId(e.target.value)}>
-                    <option value="">— No Challenge —</option>
+                    <option value="">{t('form.no_challenge')}</option>
                     {challenges.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                   </select>
                 </div>
@@ -410,14 +415,14 @@ export default function SubmitPage() {
               ← {t('btn.back')}
             </button>
             <button className="btn btn-primary" onClick={() => goStep(step+1)}>
-              {step === 4 ? 'Review' : t('btn.next')} →
+              {step === 4 ? t('btn.review') : t('btn.next')} →
             </button>
           </div>
         )}
 
         {step === 5 && (
           <div style={{ marginTop:12 }}>
-            <button className="btn btn-outline btn-sm" onClick={() => goStep(step-1)}>← Back</button>
+            <button className="btn btn-outline btn-sm" onClick={() => goStep(step-1)}>← {t('btn.back')}</button>
           </div>
         )}
       </div>

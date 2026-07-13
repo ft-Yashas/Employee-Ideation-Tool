@@ -62,28 +62,26 @@ export default function AllIdeasPage() {
     try {
       const res = await votesApi.communityVote({ idea_id: ideaId, vote_type: voteType });
       if (res.data.success) loadIdeas();
-      else showToast(res.data.error || 'Error', 'danger');
-    } catch { showToast('Network error', 'danger'); }
+      else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch { showToast(t('msg.network_error'), 'danger'); }
   }
 
   return (
     <>
       <div className="filter-bar">
-        <input className="form-control" type="search" placeholder={t('filter.search_placeholder')}
+        <input className="form-control" type="search" placeholder={t('filter.search_ideas')}
           value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth:260 }} />
         <select className="form-control" value={status} onChange={e => setStatus(e.target.value)} style={{ width:160 }}>
           <option value="">{t('filter.all_statuses')}</option>
-          <option value="Submitted">Submitted</option>
-          <option value="Under Review">Under Review</option>
-          <option value="Approved">Approved</option>
-          <option value="Rejected">Rejected</option>
-          <option value="Implemented">Implemented</option>
+          {['Submitted','Under Review','Approved','Rejected','Implemented'].map(s => (
+            <option key={s} value={s}>{translateStatus(s, t)}</option>
+          ))}
         </select>
         <select className="form-control" value={impact} onChange={e => setImpact(e.target.value)} style={{ width:160 }}>
-          <option value="">All Impact Levels</option>
-          <option value="High">High</option>
-          <option value="Medium">Medium</option>
-          <option value="Low">Low</option>
+          <option value="">{t('filter.all_impact')}</option>
+          {['High','Medium','Low'].map(l => (
+            <option key={l} value={l}>{translateImpact(l, t)}</option>
+          ))}
         </select>
       </div>
 
@@ -93,13 +91,13 @@ export default function AllIdeasPage() {
         <table className="table">
           <thead>
             <tr>
-              <th>Code</th>
+              <th>{t('table.code')}</th>
               <th>{t('table.title')}</th>
               <th>{t('table.submitter')}</th>
               <th>{t('table.dept')}</th>
-              <th>Impact</th>
-              <th>Score</th>
-              <th>Votes</th>
+              <th>{t('table.impact')}</th>
+              <th>{t('table.score')}</th>
+              <th>{t('table.votes')}</th>
               <th>{t('table.status')}</th>
               <th>{t('table.date')}</th>
               <th></th>
@@ -143,7 +141,7 @@ export default function AllIdeasPage() {
                   <td>{i.submitted_at ? fmtDate(i.submitted_at) : '–'}</td>
                   <td>
                     <button className="btn btn-outline btn-sm" onClick={() => setOpenId(i.id)}>
-                      {t('idea.view')}
+                      {t('btn.view')}
                     </button>
                   </td>
                 </tr>

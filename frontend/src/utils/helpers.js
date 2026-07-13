@@ -1,3 +1,5 @@
+import { STATUS_KEYS, IMPACT_KEYS, AREA_KEYS, ROLE_KEYS } from '../i18n/translations';
+
 export function escHtml(str) {
   if (str == null) return '';
   return String(str)
@@ -18,11 +20,12 @@ export function timeAgo(dateStr, t) {
   if (!dateStr) return '';
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 2) return (t && t('time.just_now')) || 'Just now';
-  if (mins < 60) return mins + ((t && t('time.min_ago')) || ' min ago');
+  if (!t) return `${mins}m ago`;
+  if (mins < 2)  return t('time.just_now');
+  if (mins < 60) return t('time.min_ago', { n: mins });
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return hrs + ((t && t('time.hr_ago')) || 'h ago');
-  return Math.floor(hrs / 24) + ((t && t('time.day_ago')) || 'd ago');
+  if (hrs < 24)  return t('time.hr_ago', { n: hrs });
+  return t('time.day_ago', { n: Math.floor(hrs / 24) });
 }
 
 export function statusBadge(status) {
@@ -59,30 +62,35 @@ export function actionLabel(action) {
 }
 
 export function translateStatus(status, t) {
-  if (!t) return status;
-  const map = {
-    'Submitted': t('status.submitted'),
-    'Under Review': t('status.review'),
-    'Approved': t('status.approved'),
-    'Rejected': t('status.rejected'),
-    'Implemented': t('status.implemented'),
-    'Draft': t('status.draft'),
-  };
-  return map[status] || status;
+  if (!t || !status) return status || '';
+  return STATUS_KEYS[status] ? t(STATUS_KEYS[status]) : status;
 }
 
 export function translateImpact(level, t) {
-  if (!t) return level;
-  const map = {
-    'Low': t('impact.low'),
-    'Medium': t('impact.medium'),
-    'High': t('impact.high'),
-  };
-  return map[level] || level;
+  if (!t || !level) return level || '';
+  return IMPACT_KEYS[level] ? t(IMPACT_KEYS[level]) : level;
 }
 
-export function formatRole(role) {
+// impact_areas is stored as a comma-separated string of English area names.
+export function translateAreas(areas, t) {
+  if (!areas) return '';
+  const list = Array.isArray(areas) ? areas : String(areas).split(',');
+  return list
+    .map(a => a.trim())
+    .filter(Boolean)
+    .map(a => (t && AREA_KEYS[a] ? t(AREA_KEYS[a]) : a))
+    .join(', ');
+}
+
+export function translateArea(area, t) {
+  if (!area) return '';
+  const a = String(area).trim();
+  return t && AREA_KEYS[a] ? t(AREA_KEYS[a]) : a;
+}
+
+export function formatRole(role, t) {
   if (!role) return '';
+  if (t && ROLE_KEYS[role]) return t(ROLE_KEYS[role]);
   return role.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 

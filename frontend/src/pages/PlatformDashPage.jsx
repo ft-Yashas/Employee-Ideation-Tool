@@ -21,8 +21,8 @@ export default function PlatformDashPage() {
     try {
       const res = await platformApi.tenants();
       if (res.data.success) setTenants(res.data.tenants || []);
-      else setError(res.data.error || 'Failed to load tenants.');
-    } catch { setError('Failed to load platform data.'); }
+      else setError(res.data.error || t('msg.fail_load'));
+    } catch { setError(t('msg.fail_load')); }
     setLoading(false);
   }
 
@@ -69,7 +69,7 @@ export default function PlatformDashPage() {
       </div>
 
       <div style={{ display:'flex',justifyContent:'flex-end',margin:'20px 0 12px' }}>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>+ New Organisation</button>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>{t('pa.new_org')}</button>
       </div>
 
       {loading && <div className="empty-state"><div className="spinner"></div></div>}
@@ -77,11 +77,11 @@ export default function PlatformDashPage() {
 
       <div className="card" id="pa-tenant-list">
         {!loading && !error && !tenants.length && (
-          <div className="empty-state">{t('msg.no_ideas')}</div>
+          <div className="empty-state">{t('pa.no_tenants')}</div>
         )}
         {tenants.map(ten => {
           const implPct = ten.idea_count > 0 ? Math.round(ten.implemented_count / ten.idea_count * 100) : 0;
-          const lastAct = ten.last_activity ? new Date(ten.last_activity).toLocaleDateString() : 'No activity';
+          const lastAct = ten.last_activity ? new Date(ten.last_activity).toLocaleDateString() : t('pa.no_activity');
           return (
             <div key={ten.id} style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 0',borderBottom:'1px solid var(--border)' }}>
               <div style={{ flex:1 }}>
@@ -108,7 +108,7 @@ export default function PlatformDashPage() {
         })}
       </div>
 
-      {showCreate && <CreateOrgModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); showToast('Organisation created!','success'); }} t={t} />}
+      {showCreate && <CreateOrgModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); showToast(t('pa.created'),'success'); }} t={t} />}
     </>
   );
 }
@@ -129,15 +129,15 @@ function CreateOrgModal({ onClose, onCreated, t }) {
   }
 
   async function handleSubmit() {
-    if (!orgName||!slug||!adminName||!adminEmail||!adminPass) { setError('All fields are required.'); return; }
+    if (!orgName||!slug||!adminName||!adminEmail||!adminPass) { setError(t('pa.all_required')); return; }
     setSaving(true); setError('');
     try {
       const res = await platformApi.createTenant({ org_name: orgName, slug, admin_name: adminName, admin_email: adminEmail, admin_password: adminPass });
       if (res.data.success) {
-        alert(`✅ Organisation created!\n\nOrg Code: ${res.data.slug}\nAdmin Email: ${res.data.admin_email}\n\nShare the org code and admin credentials with the organisation.`);
+        alert(`✅ ${t('pa.created')}\n\n${t('pa.org_slug')}: ${res.data.slug}\n${t('pa.admin_email')}: ${res.data.admin_email}`);
         onCreated();
-      } else { setError(res.data.error || 'Failed to create organisation.'); }
-    } catch { setError('Server error. Please try again.'); }
+      } else { setError(res.data.error || t('pa.create_failed')); }
+    } catch { setError(t('msg.server_error')); }
     setSaving(false);
   }
 
@@ -145,30 +145,30 @@ function CreateOrgModal({ onClose, onCreated, t }) {
     <div className="modal-overlay open" onClick={e => e.target===e.currentTarget && onClose()}>
       <div className="modal" id="modal-create-org" style={{ maxWidth:480 }}>
         <div className="modal-header">
-          <span>Create New Organisation</span>
+          <span>{t('pa.create_title')}</span>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
           {error && <div className="alert alert-danger" id="create-org-error">{error}</div>}
-          <div className="form-group"><label>Organisation Name *</label>
+          <div className="form-group"><label>{t('pa.org_name')} *</label>
             <input className="form-control" id="co-org-name" value={orgName} onChange={e => handleOrgNameChange(e.target.value)} /></div>
-          <div className="form-group"><label>Org Code (URL slug) *</label>
+          <div className="form-group"><label>{t('pa.org_slug')} *</label>
             <input className="form-control" id="co-slug" value={slug}
               onChange={e => { setSlug(e.target.value); setSlugEdited(true); }} style={{ textTransform:'lowercase' }} />
-            <div style={{ fontSize:11,color:'var(--subtle)',marginTop:3 }}>Used in login URL: ?org={slug||'your-code'}</div>
+            <div style={{ fontSize:11,color:'var(--subtle)',marginTop:3 }}>{t('pa.slug_hint')}{slug||'your-code'}</div>
           </div>
-          <div style={{ fontSize:13,fontWeight:600,color:'var(--heading)',margin:'14px 0 10px' }}>Super Admin Account</div>
-          <div className="form-group"><label>Admin Name *</label>
+          <div style={{ fontSize:13,fontWeight:600,color:'var(--heading)',margin:'14px 0 10px' }}>{t('pa.admin_account')}</div>
+          <div className="form-group"><label>{t('pa.admin_name')} *</label>
             <input className="form-control" id="co-admin-name" value={adminName} onChange={e => setAdminName(e.target.value)} /></div>
-          <div className="form-group"><label>Admin Email *</label>
+          <div className="form-group"><label>{t('pa.admin_email')} *</label>
             <input className="form-control" type="email" id="co-admin-email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} /></div>
-          <div className="form-group"><label>Admin Password *</label>
+          <div className="form-group"><label>{t('pa.admin_password')} *</label>
             <input className="form-control" type="password" id="co-admin-pass" value={adminPass} onChange={e => setAdminPass(e.target.value)} /></div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn btn-outline" onClick={onClose}>{t('btn.cancel')}</button>
           <button className="btn btn-primary" id="co-submit-btn" disabled={saving} onClick={handleSubmit}>
-            {saving?'Creating…':'Create Organisation'}
+            {saving ? t('pa.creating') : t('pa.create_btn')}
           </button>
         </div>
       </div>

@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
 import { votesApi } from '../services/api';
-import { statusBadge, impactBadge, scoreBadgeClass, translateStatus, fmtDate } from '../utils/helpers';
+import { statusBadge, impactBadge, scoreBadgeClass, translateStatus, translateImpact, fmtDate } from '../utils/helpers';
 import IdeaDetailModal from '../components/IdeaDetailModal';
 
 export default function BoardPage() {
@@ -24,8 +24,8 @@ export default function BoardPage() {
     try {
       const res = await votesApi.board({ sort });
       if (res.data.success) setIdeas(res.data.ideas || []);
-      else setError(res.data.error || 'Failed to load board.');
-    } catch { setError('Failed to load board.'); }
+      else setError(res.data.error || t('board.load_failed'));
+    } catch { setError(t('board.load_failed')); }
     setLoading(false);
   }
 
@@ -33,25 +33,25 @@ export default function BoardPage() {
     try {
       const res = await votesApi.communityVote({ idea_id: ideaId, vote_type: voteType }); // POST /votes/community
       if (res.data.success) load();
-      else showToast(res.data.error || 'Error', 'danger');
-    } catch { showToast('Network error', 'danger'); }
+      else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch { showToast(t('msg.network_error'), 'danger'); }
   }
 
   return (
     <>
       <div className="filter-bar">
         <select className="form-control" value={sort} onChange={e => setSort(e.target.value)} style={{ width:180 }}>
-          <option value="votes">Sort: Most Votes</option>
-          <option value="newest">Sort: Newest</option>
-          <option value="score">Sort: AI Score</option>
+          <option value="votes">{t('board.sort_votes')}</option>
+          <option value="newest">{t('board.sort_newest')}</option>
+          <option value="score">{t('board.sort_score')}</option>
         </select>
       </div>
 
-      {loading && <div className="empty-state"><div className="spinner"></div> Loading…</div>}
+      {loading && <div className="empty-state"><div className="spinner"></div> {t('msg.loading')}</div>}
       {error   && <div className="alert alert-danger">{error}</div>}
 
       {!loading && !error && !ideas.length && (
-        <div className="empty-state">No ideas on the board yet.</div>
+        <div className="empty-state">{t('board.empty')}</div>
       )}
 
       <div id="board-list">
@@ -99,9 +99,11 @@ export default function BoardPage() {
                   </div>
                   <div style={{ display:'flex',gap:8,marginTop:8,alignItems:'center',flexWrap:'wrap' }}>
                     <span className={`badge ${statusBadge(i.status)}`}>{translateStatus(i.status,t)}</span>
-                    <span className={`badge ${impactBadge(i.impact_level)}`}>{i.impact_level} Impact</span>
+                    <span className={`badge ${impactBadge(i.impact_level)}`}>
+                      {translateImpact(i.impact_level, t)} {t('idea.impact_suffix')}
+                    </span>
                     {i.ai_score > 0 && <span className={scoreBadgeClass(i.ai_score)}>AI: {i.ai_score}/100</span>}
-                    <button className="btn btn-outline btn-sm" onClick={() => setOpenId(i.id)}>View</button>
+                    <button className="btn btn-outline btn-sm" onClick={() => setOpenId(i.id)}>{t('btn.view')}</button>
                   </div>
                 </div>
               </div>

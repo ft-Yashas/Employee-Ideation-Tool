@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useLang } from '../context/LangContext';
 import { ideasApi } from '../services/api';
-import { statusBadge, impactBadge, scoreBadgeClass, translateStatus, translateImpact, fmtDate, engagementIndex } from '../utils/helpers';
+import { statusBadge, impactBadge, scoreBadgeClass, translateStatus, translateImpact, translateAreas, fmtDate, engagementIndex } from '../utils/helpers';
 import IdeaDetailModal from '../components/IdeaDetailModal';
 
-function EngBadge({ aiScore, avgRating, voteCount }) {
+function EngBadge({ aiScore, avgRating, voteCount, t }) {
   const ei = engagementIndex(aiScore, avgRating, voteCount);
   if (!aiScore && !voteCount) return null;
-  const tier = ei >= 70 ? { bg:'#bbf7d0',color:'#065f46',lbl:'High' }
-             : ei >= 40 ? { bg:'#fef3c7',color:'#92400e',lbl:'Med'  }
-             : { bg:'#fee2e2',color:'#991b1b',lbl:'Low' };
+  const tier = ei >= 70 ? { bg:'#bbf7d0',color:'#065f46',lbl:t('eng.high') }
+             : ei >= 40 ? { bg:'#fef3c7',color:'#92400e',lbl:t('eng.med')  }
+             : { bg:'#fee2e2',color:'#991b1b',lbl:t('eng.low') };
   return (
     <span style={{ fontSize:10,fontWeight:700,padding:'2px 6px',borderRadius:20,background:tier.bg,color:tier.color,border:`1px solid ${tier.bg}` }}>
       EI:{ei} {tier.lbl}
@@ -67,19 +67,16 @@ export default function MyIdeasPage() {
         <input
           className="form-control"
           type="search"
-          placeholder={t('filter.search_placeholder')}
+          placeholder={t('filter.search_ideas')}
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{ maxWidth:280 }}
         />
         <select className="form-control" value={status} onChange={e => setStatus(e.target.value)} style={{ width:160 }}>
           <option value="">{t('filter.all_statuses')}</option>
-          <option value="Draft">Draft</option>
-          <option value="Submitted">Submitted</option>
-          <option value="Under Review">Under Review</option>
-          <option value="Approved">Approved</option>
-          <option value="Rejected">Rejected</option>
-          <option value="Implemented">Implemented</option>
+          {['Draft','Submitted','Under Review','Approved','Rejected','Implemented'].map(s => (
+            <option key={s} value={s}>{translateStatus(s, t)}</option>
+          ))}
         </select>
       </div>
 
@@ -101,19 +98,21 @@ export default function MyIdeasPage() {
               <div style={{ display:'flex',flexDirection:'column',alignItems:'flex-end',gap:4 }}>
                 <span className={`badge ${statusBadge(i.status)}`}>{translateStatus(i.status, t)}</span>
                 {i.ai_score > 0 && <span className={scoreBadgeClass(i.ai_score)}>{i.ai_score}/100</span>}
-                {i.status !== 'Draft' && <EngBadge aiScore={i.ai_score} avgRating={i.avg_rating} voteCount={i.vote_count} />}
+                {i.status !== 'Draft' && <EngBadge aiScore={i.ai_score} avgRating={i.avg_rating} voteCount={i.vote_count} t={t} />}
               </div>
             </div>
-            <div className="idea-card-meta">{i.impact_areas || '—'} · {i.submitted_at ? fmtDate(i.submitted_at) : 'Draft'}</div>
+            <div className="idea-card-meta">
+              {translateAreas(i.impact_areas, t) || '—'} · {i.submitted_at ? fmtDate(i.submitted_at) : translateStatus('Draft', t)}
+            </div>
             {i.status !== 'Draft' && <div style={{ marginTop:4 }}><EngMiniStats avgRating={i.avg_rating} voteCount={i.vote_count} /></div>}
             <div className="idea-card-footer">
               <span className={`badge ${impactBadge(i.impact_level)}`}>
                 {translateImpact(i.impact_level, t)||'–'} {t('idea.impact_suffix')}
               </span>
               <div style={{ display:'flex',gap:8,alignItems:'center' }}>
-                {i.points_awarded > 0 && <span className="points-badge">+{i.points_awarded} pts</span>}
+                {i.points_awarded > 0 && <span className="points-badge">+{i.points_awarded} {t('unit.pts')}</span>}
                 <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); setOpenId(i.id); }}>
-                  {t('idea.view')}
+                  {t('btn.view')}
                 </button>
               </div>
             </div>

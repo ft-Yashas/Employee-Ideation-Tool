@@ -24,30 +24,30 @@ export default function ChallengesPage() {
     try {
       const res = await challengesApi.list();
       if (res.data.success) setList(res.data.challenges || []);
-      else setError(res.data.error || 'Failed to load challenges.');
-    } catch { setError('Failed to load challenges.'); }
+      else setError(res.data.error || t('challenges.load_failed'));
+    } catch { setError(t('challenges.load_failed')); }
     setLoading(false);
   }
 
   async function handleCreate() {
-    const title = prompt('Challenge title:');
+    const title = prompt(t('challenges.prompt_title'));
     if (!title?.trim()) return;
-    const desc     = prompt('Description (optional):') || '';
-    const deadline = prompt('Deadline (YYYY-MM-DD, optional):') || null;
+    const desc     = prompt(t('challenges.prompt_desc')) || '';
+    const deadline = prompt(t('challenges.prompt_deadline')) || null;
     try {
       const res = await challengesApi.create({ title: title.trim(), description: desc, deadline: deadline || null });
-      if (res.data.success) { showToast('Challenge created.', 'success'); load(); }
-      else showToast(res.data.error || 'Error', 'danger');
-    } catch { showToast('Network error.', 'danger'); }
+      if (res.data.success) { showToast(t('challenges.created'), 'success'); load(); }
+      else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch { showToast(t('msg.network_error'), 'danger'); }
   }
 
   async function handleClose(id) {
-    if (!confirm('Close this challenge? Submissions will stop.')) return;
+    if (!confirm(t('challenges.confirm_close'))) return;
     try {
       const res = await challengesApi.update({ id, status: 'closed' });
-      if (res.data.success) { showToast('Challenge closed.', 'success'); load(); }
-      else showToast(res.data.error || 'Error', 'danger');
-    } catch { showToast('Network error.', 'danger'); }
+      if (res.data.success) { showToast(t('challenges.closed'), 'success'); load(); }
+      else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch { showToast(t('msg.network_error'), 'danger'); }
   }
 
   return (
@@ -55,16 +55,16 @@ export default function ChallengesPage() {
       <div style={{ display:'flex',justifyContent:'flex-end',marginBottom:16 }}>
         {isPriv && (
           <button className="btn btn-primary btn-sm" id="btn-new-challenge" onClick={handleCreate}>
-            + New Challenge
+            {t('challenges.new')}
           </button>
         )}
       </div>
 
-      {loading && <div className="empty-state"><div className="spinner"></div> Loading…</div>}
+      {loading && <div className="empty-state"><div className="spinner"></div> {t('msg.loading')}</div>}
       {error   && <div className="alert alert-danger">{error}</div>}
 
       {!loading && !error && !list.length && (
-        <div className="empty-state">No active challenges at the moment.</div>
+        <div className="empty-state">{t('challenges.none')}</div>
       )}
 
       <div id="challenges-list">
@@ -74,7 +74,7 @@ export default function ChallengesPage() {
               <div>
                 <div style={{ fontSize:15,fontWeight:600,color:'var(--heading)' }}>{c.title}</div>
                 <div style={{ fontSize:12,color:'var(--text-muted)',marginTop:2 }}>
-                  By {c.creator_name||'Admin'} · {c.deadline ? 'Deadline: ' + fmtDate(c.deadline) : 'No deadline'} · {c.idea_count||0} ideas
+                  {t('challenges.by')} {c.creator_name||'—'} · {c.deadline ? `${t('challenges.deadline')} ${fmtDate(c.deadline)}` : t('challenges.no_deadline')} · {c.idea_count||0} {t('unit.ideas')}
                 </div>
               </div>
               <span style={{
@@ -82,18 +82,18 @@ export default function ChallengesPage() {
                 background:c.status==='active'?'#bbf7d0':'#f1f5f9',
                 color:c.status==='active'?'#10b981':'#64748b',
                 border:`1px solid ${c.status==='active'?'#bbf7d0':'#e2e8f0'}`
-              }}>{c.status}</span>
+              }}>{t(c.status==='active' ? 'challenges.status_active' : 'challenges.status_closed')}</span>
             </div>
             {c.description && (
               <div style={{ marginTop:10,fontSize:13,color:'var(--text)' }}>{c.description}</div>
             )}
             <div style={{ marginTop:12,display:'flex',gap:8 }}>
               <button className="btn btn-primary btn-sm" onClick={() => navigate('/submit')}>
-                Submit Idea for This Challenge
+                {t('challenges.submit_for')}
               </button>
               {isPriv && c.status === 'active' && (
                 <button className="btn btn-outline btn-sm" onClick={() => handleClose(c.id)}>
-                  Close Challenge
+                  {t('challenges.close')}
                 </button>
               )}
             </div>

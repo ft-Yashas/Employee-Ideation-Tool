@@ -69,12 +69,12 @@ export default function Sidebar({ collapsed, onToggle }) {
           <NavItem path="/dashboard"  icon={NAV_ICONS.dashboard}  label={t('nav.dashboard')} hidden={isSA} />
           <NavItem path="/my-ideas"   icon={NAV_ICONS.myIdeas}    label={t('nav.my_ideas')}  hidden={isSA} />
           <NavItem path="/submit"     icon={NAV_ICONS.submit}     label={t('nav.submit')}    hidden={isSA} />
-          <NavItem path="/challenges" icon={NAV_ICONS.challenges}  label="Challenges"         hidden={isSA} />
+          <NavItem path="/challenges" icon={NAV_ICONS.challenges}  label={t('nav.challenges')} hidden={isSA} />
 
           <div className="nav-section">{t('section.workflow')}</div>
           <NavItem path="/review"     icon={NAV_ICONS.review}     label={t('nav.review')}    hidden={!isPriv} />
           <NavItem path="/all-ideas"  icon={NAV_ICONS.allIdeas}   label={t('nav.all_ideas')} />
-          <NavItem path="/board"      icon={NAV_ICONS.board}      label="Idea Board"         />
+          <NavItem path="/board"      icon={NAV_ICONS.board}      label={t('nav.board')}     />
           <NavItem path="/audit"      icon={NAV_ICONS.audit}      label={t('nav.audit')}     hidden={!isPriv} />
 
           <div className="nav-section">{t('section.insights')}</div>
@@ -98,8 +98,8 @@ export default function Sidebar({ collapsed, onToggle }) {
 
       {isPA && (
         <>
-          <div className="nav-section">Platform</div>
-          <NavItem path="/platform" icon={NAV_ICONS.platformDash} label="Platform Dashboard" />
+          <div className="nav-section">{t('section.platform')}</div>
+          <NavItem path="/platform" icon={NAV_ICONS.platformDash} label={t('nav.platform')} />
         </>
       )}
 
@@ -113,9 +113,9 @@ export default function Sidebar({ collapsed, onToggle }) {
         </div>
         <div className="sidebar-user-info">
           <span style={{ fontSize:13,fontWeight:600 }}>{user.name}</span>
-          <span>{formatRole(user.role)}</span>
+          <span>{formatRole(user.role, t)}</span>
           {!isPA && !isSA && (
-            <span><span className="points-badge">{user.points || 0} pts</span></span>
+            <span><span className="points-badge">{user.points || 0} {t('unit.pts')}</span></span>
           )}
         </div>
       </div>

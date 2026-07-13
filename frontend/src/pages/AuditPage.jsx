@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LangContext';
 import { usersApi } from '../services/api';
-import { fmtDate, statusBadge, translateStatus, isPrivileged } from '../utils/helpers';
+import { fmtDate, statusBadge, translateStatus, formatRole, isPrivileged } from '../utils/helpers';
 
 export default function AuditPage() {
   const { user }   = useAuth();
@@ -61,7 +61,7 @@ export default function AuditPage() {
                 <br /><small>{(w.idea_title||'').substring(0,40)}</small>
               </td>
               <td><span className={`badge ${statusBadge(w.action)}`}>{translateStatus(w.action, t)}</span></td>
-              <td>{w.actor_name} <small>({w.actor_role})</small></td>
+              <td>{w.actor_name} <small>({formatRole(w.actor_role, t)})</small></td>
               <td>{w.comment || '—'}</td>
             </tr>
           ))}

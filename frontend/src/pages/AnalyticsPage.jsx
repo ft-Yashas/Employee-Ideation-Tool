@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LangContext';
 import { usersApi } from '../services/api';
-import { isPrivileged, translateStatus } from '../utils/helpers';
+import { isPrivileged, translateStatus, translateArea } from '../utils/helpers';
 
 const STATUS_COLORS = {
   'Submitted':'#374151','Under Review':'#f59e0b','Approved':'#10b981',
@@ -152,7 +152,7 @@ export default function AnalyticsPage() {
           <div className="bar-chart" id="analytics-impact">
             {impDist.map(([k,v], i) => (
               <div className="bar-row" key={k}>
-                <span className="bar-label">{k}</span>
+                <span className="bar-label">{translateArea(k, t)}</span>
                 <div className="bar-track">
                   <div className="bar-fill" style={{ width:`${Math.round(v/maxImp*100)}%`,background:IMP_COLORS[i%IMP_COLORS.length] }}></div>
                 </div>
@@ -177,7 +177,7 @@ export default function AnalyticsPage() {
                   <span className="bar-val">{row.total}</span>
                 </div>
               ))
-              : <div className="empty-state">No trend data yet.</div>
+              : <div className="empty-state">{t('analytics.no_trend')}</div>
             }
           </div>
         </div>

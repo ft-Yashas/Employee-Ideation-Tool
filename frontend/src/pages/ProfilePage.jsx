@@ -17,7 +17,7 @@ export default function ProfilePage() {
         <div id="profile-name" style={{ fontSize:20,fontWeight:700,color:'var(--heading)' }}>{user.name}</div>
         <div style={{ fontSize:13,color:'var(--subtle)',marginTop:2 }} id="profile-empid">{user.employee_id}</div>
         <span id="profile-role-badge" className="badge" style={{ marginTop:8,display:'inline-block',background:'var(--chip-bg)',color:'var(--text)',border:'1px solid var(--border)' }}>
-          {formatRole(user.role)}
+          {formatRole(user.role, t)}
         </span>
 
         <div id="profile-stats" style={{ display:'flex',justifyContent:'center',gap:32,marginTop:20 }}>
@@ -29,7 +29,7 @@ export default function ProfilePage() {
       </div>
 
       <div className="card" style={{ marginTop:16 }}>
-        <div style={{ fontWeight:700,fontSize:13,marginBottom:14,color:'var(--heading)' }}>Profile Details</div>
+        <div style={{ fontWeight:700,fontSize:13,marginBottom:14,color:'var(--heading)' }}>{t('profile.details')}</div>
         <table className="table" id="profile-table">
           <tbody>
             <tr><td style={{ color:'var(--subtle)',padding:'5px 0' }}>{t('profile.dept')}</td><td>{user.department||'–'}</td></tr>
