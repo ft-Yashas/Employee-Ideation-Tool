@@ -32,7 +32,8 @@ function handleFile(req, res, next) {
 
 const router = Router();
 
-router.post('/', requireAuth, handleFile, uploads.upload);   // action=upload
-router.delete('/:id', requireAuth, uploads.remove);          // action=delete
+router.post('/', requireAuth, handleFile, uploads.upload);            // action=upload
+router.get('/:id/download', requireAuth, uploads.download);          // authenticated file fetch
+router.delete('/:id', requireAuth, uploads.remove);                  // action=delete
 
 export default router;

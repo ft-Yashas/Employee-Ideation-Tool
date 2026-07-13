@@ -7,10 +7,6 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import config from './config/index.js';
 import apiRoutes from './routes/index.js';
@@ -21,10 +17,33 @@ export function createApp() {
   const app = express();
 
   app.set('trust proxy', 1);
+  app.disable('x-powered-by');
 
-  // Security headers. crossOriginResourcePolicy relaxed so the frontend origin
-  // can load API-served upload assets.
-  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+  // Security headers.
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'same-site' },
+      // The API serves JSON and file downloads, never HTML, so lock the CSP all
+      // the way down. (The React app is served separately by the web server and
+      // gets its own CSP — see docs/DEPLOYMENT.md.)
+      contentSecurityPolicy: {
+        directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], sandbox: [] },
+      },
+      referrerPolicy: { policy: 'no-referrer' },
+      hsts: config.forceHttps
+        ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+        : false,
+    })
+  );
+
+  // Behind a TLS-terminating proxy, redirect any plaintext request rather than
+  // letting a bearer token travel in the clear.
+  if (config.forceHttps) {
+    app.use((req, res, next) => {
+      if (req.secure || req.headers['x-forwarded-proto'] === 'https') return next();
+      return res.redirect(308, `https://${req.headers.host}${req.originalUrl}`);
+    });
+  }
 
   // CORS allow-list from config. JWT lives in the Authorization header (not a
   // cookie), so credentials are not required.
@@ -39,8 +58,8 @@ export function createApp() {
     })
   );
 
-  app.use(express.json({ limit: '2mb' }));
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   if (config.env !== 'test') {
     app.use(morgan(config.env === 'development' ? 'dev' : 'combined'));
@@ -48,8 +67,12 @@ export function createApp() {
 
   app.use(globalLimiter);
 
-  // Serve tenant upload assets (parity with PHP api/uploads/<slug>/...).
-  app.use('/api/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+  // NOTE: uploads are deliberately NOT served by express.static any more.
+  // Mounting the uploads directory publicly meant every idea attachment —
+  // employee-authored documents — was downloadable by anyone with the URL, with
+  // no login and no tenant check. They now go through
+  // GET /api/upload/:id/download, which authenticates the caller, scopes the
+  // lookup to their tenant's database, and streams the file as an attachment.
 
   app.use('/api', apiRoutes);
 

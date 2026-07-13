@@ -27,6 +27,31 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// A 401 now means the session is genuinely gone: expired, or revoked server-side
+// because the account was deactivated, its role changed, or its password was
+// reset. Drop the dead token and bounce to login rather than leaving the UI in a
+// half-broken state issuing failing calls.
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401 && !isAuthEndpoint(err.config?.url)) {
+      localStorage.removeItem('ifqm_token');
+      localStorage.removeItem('ifqm_org');
+      if (!window.location.pathname.startsWith('/login') && window.location.pathname !== '/') {
+        window.location.replace('/');
+      }
+    }
+    return Promise.reject(err);
+  }
+);
+
+// The login call itself returns 401 on bad credentials — that must surface as a
+// form error, not a redirect loop.
+function isAuthEndpoint(url = '') {
+  return url.includes('/auth/login') || url.includes('/auth/reset-password') ||
+         url.includes('/auth/forgot-password');
+}
+
 export default api;
 
 // ── Auth ──────────────────────────────────────────────────────────
@@ -115,16 +140,50 @@ export const challengesApi = {
 };
 
 // ── Export ────────────────────────────────────────────────────────
+// These used to build URLs with the JWT in the query string
+// (`?token=<jwt>`), which leaks the credential into browser history, proxy and
+// server access logs, and the Referer header of any outbound link. They also
+// pointed at paths the backend never exposed (/ideas-csv vs /ideas), so they
+// could not have worked. Downloads now go through the normal authenticated
+// client and are handed to the user as a blob.
+async function downloadBlob(path, filename) {
+  const res = await api.get(path, { responseType: 'blob' });
+  saveBlob(res.data, filename);
+}
+
 export const exportApi = {
-  ideasCsv: () => `/api/export/ideas-csv?org_slug=${localStorage.getItem('ifqm_org')}&token=${localStorage.getItem('ifqm_token')}`,
-  leaderboardCsv: () => `/api/export/leaderboard-csv?org_slug=${localStorage.getItem('ifqm_org')}&token=${localStorage.getItem('ifqm_token')}`,
-  analyticsHtml: () => `/api/export/analytics-html?org_slug=${localStorage.getItem('ifqm_org')}&token=${localStorage.getItem('ifqm_token')}`,
+  ideasCsv: () => downloadBlob('/export/ideas', 'ideas.csv'),
+  leaderboardCsv: () => downloadBlob('/export/leaderboard', 'leaderboard.csv'),
+  analyticsHtml: () => downloadBlob('/export/analytics', 'analytics.html'),
 };
+
+/** Trigger a browser "save as" for an in-memory blob. */
+export function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'download';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick so the click has definitely been dispatched.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 // ── Upload ────────────────────────────────────────────────────────
 export const uploadApi = {
   upload: (formData) => api.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   delete: (id) => api.delete(`/upload/${id}`),
+
+  // Attachments are no longer public files on disk — they are fetched through
+  // an authenticated, tenant-scoped endpoint. <img src> and <a href> cannot
+  // carry an Authorization header, so we pull the bytes and hand back an
+  // object URL rather than putting a credential in the URL.
+  fetchBlob: (id) => api.get(`/upload/${id}/download`, { responseType: 'blob' }).then((r) => r.data),
+  download: async (id, filename) => {
+    const blob = await uploadApi.fetchBlob(id);
+    saveBlob(blob, filename);
+  },
 };
 
 // ── Platform (platform admin only) ───────────────────────────────

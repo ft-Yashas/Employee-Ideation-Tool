@@ -39,11 +39,26 @@ function buildTransport(settings) {
   return nodemailer.createTransport({
     host,
     port,
-    secure: port === 465, // implicit TLS; 587 upgrades via STARTTLS automatically
+    secure: port === 465, // implicit TLS
+    // On 587, STARTTLS is normally opportunistic — if the server doesn't offer
+    // it, nodemailer would happily send the SMTP password in the clear. Require
+    // the upgrade instead, and refuse to talk to a server with a bad cert.
+    requireTLS: port !== 465,
+    tls: { rejectUnauthorized: true, minVersion: 'TLSv1.2' },
     auth: user ? { user, pass } : undefined,
     connectionTimeout: 15000,
     greetingTimeout: 15000,
   });
+}
+
+/**
+ * Strip CR/LF (and quotes) from anything interpolated into an address header.
+ * The display names come from org settings, i.e. they are admin-controlled
+ * input; a newline in one is the classic route to injecting extra SMTP headers
+ * (Bcc:, Reply-To:) into the outgoing message.
+ */
+function headerSafe(s) {
+  return String(s ?? '').replace(/[\r\n"<>]/g, ' ').trim();
 }
 
 /**
@@ -52,13 +67,14 @@ function buildTransport(settings) {
  */
 export async function sendSmtpEmail(settings, toEmail, toName, subject, bodyHtml) {
   const transport = buildTransport(settings);
-  const from = String(settings.smtp_from || settings.smtp_user || '').trim();
-  const fromName = String(settings.smtp_from_name || 'IFQM Ideation').trim();
+  const from = headerSafe(settings.smtp_from || settings.smtp_user || '');
+  const fromName = headerSafe(settings.smtp_from_name || 'IFQM Ideation');
+  const safeTo = headerSafe(toEmail);
 
   await transport.sendMail({
-    from: `"${fromName}" <${from}>`,
-    to: toName ? `"${toName}" <${toEmail}>` : toEmail,
-    subject,
+    from: { name: fromName, address: from },
+    to: toName ? { name: headerSafe(toName), address: safeTo } : safeTo,
+    subject: headerSafe(subject),
     html: bodyHtml,
   });
   return true;

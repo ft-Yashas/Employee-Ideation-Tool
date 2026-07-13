@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
-import { ideasApi, votesApi } from '../services/api';
+import { ideasApi, votesApi, uploadApi } from '../services/api';
 import {
   statusBadge, impactBadge, scoreBadgeClass, translateStatus, translateImpact, translateAreas,
   fmtDate, actionLabel, isPrivileged, communityScore,
@@ -95,8 +95,6 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
   const adjStr = (cScoreVal - (parseInt(idea?.ai_score)||0)) >= 0
     ? `+${cScoreVal-(parseInt(idea?.ai_score)||0)}`
     : `${cScoreVal-(parseInt(idea?.ai_score)||0)}`;
-
-  const attachmentBaseUrl = '/api/uploads/';
 
   return (
     <>
@@ -291,27 +289,7 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
                 <div id="dtab3" className={`tab-content${activeTab===2?' active':''}`} style={{ display:activeTab===2?'block':'none' }}>
                   {!(idea.attachments||[]).length
                     ? <div className="empty-state">{t('detail.no_attachments')}</div>
-                    : (idea.attachments||[]).map((a, i) => {
-                      const url     = attachmentBaseUrl + a.filepath;
-                      const ext     = a.filename.split('.').pop().toLowerCase();
-                      const isImage = ['png','jpg','jpeg','gif','webp'].includes(ext);
-                      return (
-                        <div key={i} style={{ padding:'10px 0',borderBottom:'1px solid var(--border)' }}>
-                          <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between' }}>
-                            <div>
-                              <span style={{ fontSize:12,color:'var(--subtle)',textTransform:'uppercase',marginRight:6 }}>{a.section}</span>
-                              <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:13,color:'#374151' }}>{a.filename}</a>
-                            </div>
-                            <a href={url} download={a.filename} className="btn btn-outline btn-sm">{t('btn.download')}</a>
-                          </div>
-                          {isImage && (
-                            <div style={{ marginTop:8 }}>
-                              <img src={url} alt={a.filename} style={{ maxWidth:'100%',maxHeight:320,borderRadius:6,border:'1px solid #e0e0e0',display:'block' }} />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
+                    : (idea.attachments||[]).map(a => <Attachment key={a.id} att={a} t={t} />)
                   }
                 </div>
               </>
@@ -348,6 +326,73 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
           onClose={() => { setShowRvDecision(false); onClose(); }} />
       )}
     </>
+  );
+}
+
+const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif'];
+
+/**
+ * A single idea attachment.
+ *
+ * Attachments are private: they are streamed from an authenticated,
+ * tenant-scoped endpoint rather than sitting on a public URL. A plain
+ * <img src> / <a href> cannot send the Authorization header, so image previews
+ * are fetched as a blob and shown via an object URL, and the download button
+ * pulls the bytes through the API client.
+ */
+function Attachment({ att, t }) {
+  const { showToast } = useToast();
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const ext     = (att.filename.split('.').pop() || '').toLowerCase();
+  const isImage = IMAGE_EXT.includes(ext);
+
+  useEffect(() => {
+    if (!isImage) return undefined;
+    let url = '';
+    let cancelled = false;
+    uploadApi.fetchBlob(att.id)
+      .then(blob => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setPreviewUrl(url);
+      })
+      .catch(() => { /* preview is best-effort; the download button still works */ });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url); // don't leak the blob when the modal closes
+    };
+  }, [att.id, isImage]);
+
+  async function handleDownload() {
+    setBusy(true);
+    try {
+      await uploadApi.download(att.id, att.filename);
+    } catch {
+      showToast(t('msg.network_error'), 'danger');
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ padding:'10px 0',borderBottom:'1px solid var(--border)' }}>
+      <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',gap:10 }}>
+        <div style={{ minWidth:0 }}>
+          <span style={{ fontSize:12,color:'var(--subtle)',textTransform:'uppercase',marginRight:6 }}>{att.section}</span>
+          <span style={{ fontSize:13,color:'var(--text)' }}>{att.filename}</span>
+        </div>
+        <button className="btn btn-outline btn-sm" disabled={busy} onClick={handleDownload}>
+          {busy ? t('msg.loading') : t('btn.download')}
+        </button>
+      </div>
+      {isImage && previewUrl && (
+        <div style={{ marginTop:8 }}>
+          <img src={previewUrl} alt={att.filename}
+            style={{ maxWidth:'100%',maxHeight:320,borderRadius:6,border:'1px solid var(--border)',display:'block' }} />
+        </div>
+      )}
+    </div>
   );
 }
 

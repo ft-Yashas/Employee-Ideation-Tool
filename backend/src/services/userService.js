@@ -12,6 +12,7 @@
  */
 import bcrypt from 'bcryptjs';
 import { badRequest, forbidden, notFound, ApiError } from '../utils/respond.js';
+import { assertPasswordStrength } from './authService.js';
 
 // Role sets used across create/update/managers (mirrors the PHP literals).
 const ROLES_ADMIN_CAN_ASSIGN = [
@@ -78,7 +79,7 @@ export async function createUser(db, actor, body) {
     throw badRequest('Name, email, employee ID, and password are required.');
   }
   if (!isValidEmail(email)) throw badRequest('Invalid email address.');
-  if (String(password).length < 6) throw badRequest('Password must be at least 6 characters.');
+  assertPasswordStrength(password);
   if (!assignableRoles(actor.role).includes(role)) throw forbidden('You cannot assign that role.');
 
   const [dup] = await db.execute(
@@ -88,12 +89,12 @@ export async function createUser(db, actor, body) {
   if (dup.length) throw new ApiError(409, 'Email or employee ID already exists.');
 
   const initials = avatarInitials(name) || firstCharUpper(name);
-  const hash = bcrypt.hashSync(password, 10);
+  const hash = bcrypt.hashSync(password, 12);
 
   const [result] = await db.execute(
     `INSERT INTO users (employee_id, name, email, password_hash, department, business_unit,
-                        location, role, manager_id, avatar_initials, status)
-     VALUES (?,?,?,?,?,?,?,?,?,?,'active')`,
+                        location, role, manager_id, avatar_initials, status, password_changed_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,'active',NOW())`,
     [employeeId, name, email, hash, department, businessUnit, location, role, managerId, initials]
   );
   return { success: true, user_id: result.insertId };
@@ -122,10 +123,16 @@ export async function updateUser(db, actor, id, body) {
 
   const initials = avatarInitials(name) || firstCharUpper(name);
 
+  // Deactivating an employee now ends their session on their very next request
+  // (the auth middleware re-reads status from this row), instead of leaving them
+  // logged in for the remaining life of their token. Same for a role change:
+  // the new role takes effect immediately rather than after the token expires.
   await db.execute(
     `UPDATE users SET name=?, department=?, business_unit=?, location=?, role=?,
-                      manager_id=?, avatar_initials=?, status=? WHERE id=?`,
-    [name, department, businessUnit, location, role, managerId, initials, status, id]
+                      manager_id=?, avatar_initials=?, status=?,
+                      deactivated_at = IF(? = 'inactive', COALESCE(deactivated_at, NOW()), NULL)
+      WHERE id=?`,
+    [name, department, businessUnit, location, role, managerId, initials, status, status, id]
   );
   return { success: true };
 }
@@ -146,7 +153,12 @@ export async function deleteUser(db, actor, id) {
     [id]
   );
   if (Number(cntRows[0].c) > 0) {
-    await db.execute("UPDATE users SET status='inactive' WHERE id=?", [id]);
+    // Offboarding: the account is retained (their ideas must keep an author) but
+    // deactivated. The live session check ends any open session immediately.
+    await db.execute(
+      "UPDATE users SET status='inactive', deactivated_at=COALESCE(deactivated_at, NOW()) WHERE id=?",
+      [id]
+    );
     return {
       success: true,
       deactivated: true,

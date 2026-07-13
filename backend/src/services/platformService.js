@@ -16,6 +16,7 @@ import config from '../config/index.js';
 import { masterDb } from '../database/master.js';
 import { getTenantPool } from '../database/tenant.js';
 import { badRequest, notFound, ApiError } from '../utils/respond.js';
+import { assertPasswordStrength } from './authService.js';
 import logger from '../utils/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -158,7 +159,8 @@ export async function createTenant(body) {
   }
   if (slug.length < 2 || slug.length > 30) throw badRequest('Org code must be 2–30 characters.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) throw badRequest('Invalid admin email address.');
-  if (String(adminPass).length < 6) throw badRequest('Admin password must be at least 6 characters.');
+  // This account is the org's super user — 6 characters was never acceptable.
+  assertPasswordStrength(adminPass, { label: 'Admin password' });
 
   const master = masterDb();
   const [dup] = await master.execute('SELECT id FROM tenants WHERE slug=? LIMIT 1', [slug]);
@@ -185,10 +187,10 @@ export async function createTenant(body) {
     }
 
     const initials = adminName.split(' ').filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || 'OA';
-    const hash = bcrypt.hashSync(adminPass, 10);
+    const hash = bcrypt.hashSync(adminPass, 12);
     await conn.execute(
-      `INSERT INTO users (employee_id, name, email, password_hash, role, avatar_initials, status)
-       VALUES (?, ?, ?, ?, 'admin', ?, 'active')`,
+      `INSERT INTO users (employee_id, name, email, password_hash, role, avatar_initials, status, password_changed_at)
+       VALUES (?, ?, ?, ?, 'admin', ?, 'active', NOW())`,
       [adminEmpId, adminName, adminEmail, hash, initials]
     );
 
@@ -199,10 +201,16 @@ export async function createTenant(body) {
       );
     }
 
+    // db_user/db_pass are written EMPTY on purpose. The registry used to store a
+    // live database username and plaintext password per tenant (in practice the
+    // root account), which turned ifqm_master into a list of working DB
+    // credentials. The app now connects with a single least-privilege account
+    // from the environment (APP_DB_USER/APP_DB_PASS) and only needs to know
+    // which host and schema a tenant lives in.
     const [res] = await master.execute(
       `INSERT INTO tenants (name, slug, domain, db_host, db_name, db_user, db_pass, status, is_default, primary_color)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 0, ?)`,
-      [orgName, slug, slug + '.localhost', config.masterDb.host, dbName, config.masterDb.user, config.masterDb.password, color]
+       VALUES (?, ?, ?, ?, ?, '', '', 'active', 0, ?)`,
+      [orgName, slug, slug + '.localhost', config.masterDb.host, dbName, color]
     );
 
     return {
@@ -215,8 +223,12 @@ export async function createTenant(body) {
       admin_email: adminEmail,
     };
   } catch (e) {
+    if (e instanceof ApiError) throw e;
     try { await master.query(`DROP DATABASE IF EXISTS \`${dbName}\``); } catch { /* ignore */ }
-    throw new ApiError(500, 'Failed to create organisation: ' + e.message);
+    // Don't echo the raw driver error back to the client — it can disclose
+    // schema names, credentials and internal paths. Log it, return a generic.
+    logger.error(`createTenant failed for slug "${slug}"`, e);
+    throw new ApiError(500, 'Failed to create organisation. Check the server logs.');
   } finally {
     if (conn) await conn.end();
   }

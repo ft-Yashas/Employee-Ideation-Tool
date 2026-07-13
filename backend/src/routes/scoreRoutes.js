@@ -6,10 +6,13 @@
 import { Router } from 'express';
 import * as score from '../controllers/scoreController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { heavyLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
 
 router.get('/', requireAuth, score.score);                        // action=score&id=
-router.post('/batch-rescore', requireRole('admin'), score.batchRescore); // action=batch_rescore
+// Batch rescore walks every idea through the AI scorer — one click, unbounded
+// cost (and real money if a provider key is configured). Cap it.
+router.post('/batch-rescore', requireRole('admin'), heavyLimiter, score.batchRescore);
 
 export default router;

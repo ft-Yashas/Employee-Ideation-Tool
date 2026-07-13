@@ -18,8 +18,13 @@ CREATE TABLE IF NOT EXISTS users (
   points          INT NOT NULL DEFAULT 0,
   avatar_initials VARCHAR(4),
   status          ENUM('active','inactive') NOT NULL DEFAULT 'active',
+  -- Any JWT issued before this moment is rejected, so a password reset
+  -- actually terminates sessions opened with the old password.
+  password_changed_at DATETIME NULL DEFAULT NULL,
+  deactivated_at  DATETIME NULL DEFAULT NULL,
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
+  FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_users_email_status (email, status)
 );
 
 CREATE TABLE IF NOT EXISTS ideas (
@@ -173,10 +178,15 @@ INSERT IGNORE INTO org_settings (key_name, value) VALUES
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   user_id     INT NOT NULL,
+  -- Tokens are <selector>.<verifier>. The selector is an indexed lookup so
+  -- verification runs exactly one bcrypt compare instead of one per row.
+  selector    CHAR(32) NOT NULL,
   token_hash  VARCHAR(255) NOT NULL,
   expires_at  DATETIME NOT NULL,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE INDEX uniq_prt_selector (selector),
+  INDEX idx_prt_expires (expires_at)
 );
 
 -- ── Performance Indexes (idempotent — MariaDB supports IF NOT EXISTS) ──

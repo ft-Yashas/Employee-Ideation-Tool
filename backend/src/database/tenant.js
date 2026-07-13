@@ -20,6 +20,7 @@
 import mysql from 'mysql2/promise';
 import config from '../config/index.js';
 import { masterDb } from './master.js';
+import { ApiError } from '../utils/respond.js';
 import logger from '../utils/logger.js';
 
 const poolCache = new Map();
@@ -62,34 +63,58 @@ export async function resolveTenant({ slug = '', host = 'localhost' } = {}) {
   const cleanSlug = sanitizeSlug(slug);
   const cleanHost = stripPort(host);
 
+  let master;
   try {
-    const master = masterDb();
+    master = masterDb();
+  } catch (err) {
+    return registryUnavailable(err, cleanHost);
+  }
 
+  try {
+    // An explicit org code is an assertion about WHICH organisation's database
+    // to open. If it doesn't match, fail — never fall through to the domain or
+    // default tenant, which would quietly authenticate the user against another
+    // organisation's data.
     if (cleanSlug) {
       const [rows] = await master.execute(
         "SELECT * FROM tenants WHERE slug = ? AND status = 'active' LIMIT 1",
         [cleanSlug]
       );
       if (rows.length) return rows[0];
+      throw new ApiError(404, 'Unknown organization code.');
     }
 
-    // Domain-based
+    // No org code given: resolve by domain, then the default tenant.
     let [rows] = await master.execute(
       "SELECT * FROM tenants WHERE domain = ? AND status = 'active' LIMIT 1",
       [cleanHost]
     );
     if (rows.length) return rows[0];
 
-    // Default tenant
     [rows] = await master.execute(
       "SELECT * FROM tenants WHERE is_default = 1 AND status = 'active' LIMIT 1"
     );
     if (rows.length) return rows[0];
-  } catch (err) {
-    logger.warn('ifqm_master unavailable, using fallback tenant', err.message);
-  }
 
-  return fallbackTenant(cleanHost);
+    throw new ApiError(404, 'Unknown organization code.');
+  } catch (err) {
+    if (err instanceof ApiError) throw err; // a real "no such tenant" answer
+    return registryUnavailable(err, cleanHost);
+  }
+}
+
+/**
+ * The tenant registry could not be reached. On a dev box we degrade to the
+ * built-in fallback tenant; in production that would mean serving a different
+ * organisation's database than the caller asked for, so we fail closed.
+ */
+function registryUnavailable(err, host) {
+  if (config.env === 'production') {
+    logger.error('Tenant registry (ifqm_master) unavailable', err.message);
+    throw new ApiError(503, 'Service temporarily unavailable. Please try again shortly.');
+  }
+  logger.warn('ifqm_master unavailable, using fallback tenant', err.message);
+  return fallbackTenant(host);
 }
 
 /** Resolve strictly by slug (used for authenticated requests carrying a JWT). */
@@ -103,24 +128,44 @@ export async function resolveTenantBySlug(slug, host = 'localhost') {
  * @returns {import('mysql2/promise').Pool}
  */
 export function getTenantPool(tenant) {
-  const key = `${tenant.db_host}|${tenant.db_name}|${tenant.db_user}`;
+  // Credentials come from config, NOT from the tenant row. The registry used to
+  // hold a plaintext db_user/db_pass per tenant — in practice root for all of
+  // them — which meant the master DB was a list of live root passwords. Only
+  // the host and schema name are tenant-specific now.
+  const user = config.appDb.user;
+  const password = config.appDb.password;
+  const host = tenant.db_host || config.masterDb.host;
+
+  const key = `${host}|${tenant.db_name}|${user}`;
   if (poolCache.has(key)) return poolCache.get(key);
 
   const pool = mysql.createPool({
-    host: tenant.db_host,
-    user: tenant.db_user,
-    password: tenant.db_pass,
+    host,
+    user,
+    password,
     database: tenant.db_name,
     charset: 'utf8mb4',
     waitForConnections: true,
     connectionLimit: 10,
+    maxIdle: 4,
+    idleTimeout: 60000,
     namedPlaceholders: false,
     dateStrings: true,
-    // PDO had ATTR_EMULATE_PREPARES => false; mysql2 uses real prepared
-    // statements for execute() by default, matching that behaviour.
+    // Real prepared statements (mysql2 default for execute()) — the PDO
+    // ATTR_EMULATE_PREPARES=false equivalent. Keeps parameter binding honest.
+    multipleStatements: false,
   });
   poolCache.set(key, pool);
   return pool;
 }
 
-export default { resolveTenant, resolveTenantBySlug, getTenantPool, fallbackTenant, sanitizeSlug };
+/** Close every cached pool — used for graceful shutdown. */
+export async function closeAllPools() {
+  const pools = [...poolCache.values()];
+  poolCache.clear();
+  await Promise.all(pools.map((p) => p.end().catch(() => {})));
+}
+
+export default {
+  resolveTenant, resolveTenantBySlug, getTenantPool, fallbackTenant, sanitizeSlug, closeAllPools,
+};

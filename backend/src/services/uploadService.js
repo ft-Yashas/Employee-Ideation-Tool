@@ -1,13 +1,18 @@
 /**
  * Upload service — Node port of PHP api/upload.php (idea attachments).
  *
- *   upload → validate params + ownership + size + extension, write the file to
- *            the per-tenant uploads dir, and record it in idea_attachments.
- *   remove → verify ownership, unlink the file, delete the row.
+ *   upload          → validate params + ownership + size + extension, write the
+ *                     file to the per-tenant uploads dir, record it in
+ *                     idea_attachments.
+ *   getDownloadable → authorise a read and resolve the file on disk.
+ *   remove          → verify ownership, unlink the file, delete the row.
  *
- * Files live under backend/uploads/<slug>/ and are served at
- * /api/uploads/<slug>/<file> (static middleware in app.js), mirroring PHP's
- * api/uploads/<slug>/ layout.
+ * Files live under backend/uploads/<slug>/ and are NOT web-accessible. They used
+ * to be served straight off disk by express.static at /api/uploads/<file>, with
+ * no authentication and no tenant check — every employee's uploaded document was
+ * downloadable by anyone who had the URL. Reads now go through
+ * GET /api/upload/:id/download, which authenticates the caller and resolves the
+ * attachment inside their own tenant's database.
  */
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -66,6 +71,72 @@ export async function upload(db, slug, user, { ideaId, section, file }) {
   return { safeName, filename: file.originalname };
 }
 
+// Extension → content type. We serve a fixed type from this map rather than
+// sniffing the client-supplied name, and always as an attachment, so a file
+// can never be rendered inline in the app's origin.
+const CONTENT_TYPES = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  csv: 'text/csv',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
+
+/**
+ * Resolve an attachment for download, enforcing tenant + visibility rules.
+ *
+ * Attachments used to be served by express.static on /api/uploads with no auth
+ * at all: every employee's uploaded document was readable by anyone who had (or
+ * guessed) the URL, across every tenant. Downloads now go through this check.
+ *
+ * `db` is already the caller's tenant pool, so an attachment id from another
+ * organisation simply doesn't resolve — cross-tenant reads are impossible.
+ */
+export async function getDownloadable(db, slug, user, attachmentId) {
+  const id = Number(attachmentId) || 0;
+  if (!id) throw badRequest('Invalid attachment id.');
+
+  const [rows] = await db.execute(
+    `SELECT a.id, a.filename, a.filepath, i.status, i.submitter_id
+       FROM idea_attachments a
+       JOIN ideas i ON i.id = a.idea_id
+      WHERE a.id = ?`,
+    [id]
+  );
+  const att = rows[0];
+  if (!att) throw new ApiError(404, 'Attachment not found.');
+
+  // An unsubmitted draft is private to its author (and org admins).
+  const isOwner = Number(att.submitter_id) === Number(user.id);
+  const isAdmin = ['admin', 'super_admin'].includes(user.role);
+  if (att.status === 'Draft' && !isOwner && !isAdmin) {
+    throw forbidden('This attachment is not available.');
+  }
+
+  // filepath is a server-generated name (attach_<hex>.<ext>), but never trust a
+  // stored value as a path — resolve it and confirm it stayed inside the
+  // tenant's own directory.
+  const dir = await tenantUploadDir(slug);
+  const abs = path.resolve(dir, path.basename(String(att.filepath)));
+  if (!abs.startsWith(path.resolve(dir) + path.sep)) {
+    throw forbidden('Invalid attachment path.');
+  }
+
+  const ext = path.extname(abs).slice(1).toLowerCase();
+  if (!ALLOWED_EXT.includes(ext)) throw forbidden('File type not allowed.');
+
+  return {
+    absPath: abs,
+    filename: att.filename || path.basename(abs),
+    contentType: CONTENT_TYPES[ext] || 'application/octet-stream',
+  };
+}
+
 export async function remove(db, slug, user, attachmentId) {
   attachmentId = Number(attachmentId) || 0;
 
@@ -85,4 +156,4 @@ export async function remove(db, slug, user, attachmentId) {
   return { success: true };
 }
 
-export default { upload, remove, tenantUploadDir };
+export default { upload, remove, tenantUploadDir, getDownloadable };

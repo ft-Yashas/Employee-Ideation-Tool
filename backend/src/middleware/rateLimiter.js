@@ -17,12 +17,36 @@ export const globalLimiter = rateLimit({
   message: { success: false, error: 'Too many requests. Please slow down.' },
 });
 
+/**
+ * Login / forgot-password / reset.
+ *
+ * The per-account lockout (5 strikes → 15 min, in authService) stops someone
+ * grinding ONE account. It does nothing against password spraying — one guess
+ * each against a thousand accounts never trips it. This IP limit is what caps
+ * that, so it has to be far lower than the old 100-per-15-min.
+ *
+ * A whole office can share one NAT'd IP, so this is per-IP-per-15-min and sized
+ * to be generous for humans (a real person mistyping a password a few times, or
+ * a dozen colleagues signing in after a reboot) while still cutting a spray
+ * attempt down to a trickle. Tune with AUTH_RATE_LIMIT if a customer's egress
+ * IP is busier than expected.
+ */
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: Number(process.env.AUTH_RATE_LIMIT) || 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many authentication requests. Please try again later.' },
+  skipSuccessfulRequests: true, // only failures count against the budget
+  message: { success: false, error: 'Too many authentication attempts. Please try again later.' },
 });
 
-export default { globalLimiter, authLimiter };
+/** Expensive endpoints (AI rescoring, exports) — cheap to ask for, costly to serve. */
+export const heavyLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'This operation is rate limited. Please try again later.' },
+});
+
+export default { globalLimiter, authLimiter, heavyLimiter };

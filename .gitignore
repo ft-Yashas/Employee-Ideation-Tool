@@ -1,2 +1,32 @@
+# ── Secrets ────────────────────────────────────────────────────────
+# Never commit a real .env — it holds the JWT signing key, the DB password and
+# the SMTP/AI credentials. Commit .env.example instead.
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Dependencies ───────────────────────────────────────────────────
+node_modules/
+
+# ── Build output ───────────────────────────────────────────────────
+dist/
+build/
+
+# ── Runtime data ───────────────────────────────────────────────────
+# Employee-uploaded attachments: real user data. Belongs in backups, not in
+# source control.
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# ── Logs / OS / editor noise ───────────────────────────────────────
+*.log
+npm-debug.log*
+logs/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
 .gstack/

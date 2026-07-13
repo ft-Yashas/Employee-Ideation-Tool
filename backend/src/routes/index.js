@@ -17,10 +17,27 @@ import exportRoutes from './exportRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import uploadRoutes from './uploadRoutes.js';
 import platformRoutes from './platformRoutes.js';
+import { masterDb } from '../database/master.js';
+import logger from '../utils/logger.js';
 
 const router = Router();
 
+// Liveness: "the process is up". Cheap enough for a load balancer to hit often.
 router.get('/health', (_req, res) => res.json({ success: true, status: 'ok' }));
+
+// Readiness: "this instance can actually serve traffic". A process that is
+// running but cannot reach its database is worse than one that is down — it
+// answers every request with a 500. Point the load balancer / orchestrator at
+// this one so a DB-less instance is pulled out of rotation instead.
+router.get('/ready', async (_req, res) => {
+  try {
+    await masterDb().query('SELECT 1');
+    return res.json({ success: true, status: 'ready' });
+  } catch (err) {
+    logger.error('Readiness check failed: master DB unreachable', err.message);
+    return res.status(503).json({ success: false, status: 'degraded', error: 'Database unreachable.' });
+  }
+});
 
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);

@@ -43,3 +43,17 @@ VALUES (
   'platform@ifqm.io',
   '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi'
 );
+
+-- ── Brute-force lockout state ────────────────────────────────────────────────
+-- Persisted rather than held in process memory: an in-memory counter reset on
+-- every restart or deploy, did not exist for a second worker process, and grew
+-- without bound. Keyed '<email>|<org-slug>' so a single account locks, not an
+-- entire office behind one NAT'd IP.
+CREATE TABLE IF NOT EXISTS login_attempts (
+  login_id      VARCHAR(191) NOT NULL PRIMARY KEY,
+  attempts      INT          NOT NULL DEFAULT 0,
+  locked_until  DATETIME     NULL DEFAULT NULL,
+  last_attempt  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                             ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_login_attempts_last (last_attempt)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -19,30 +19,68 @@ import { signToken } from '../utils/jwt.js';
 import { masterDb } from '../database/master.js';
 import { resolveTenant, getTenantPool, sanitizeSlug } from '../database/tenant.js';
 import { getOrgSettings, sendSmtpEmail } from './mailerService.js';
-import { badRequest, unauthorized, tooMany } from '../utils/respond.js';
+import { badRequest, unauthorized, tooMany, ApiError } from '../utils/respond.js';
 import logger from '../utils/logger.js';
 
-// ── Brute-force store (PHP kept this in the session; single-server parity) ──
-const loginAttempts = new Map(); // key: loginId → { count, locked_until (epoch secs) }
+// ── Brute-force lockout ──────────────────────────────────────────────────────
+// Persisted in ifqm_master.login_attempts. This used to be a process-local Map,
+// which meant the lockout reset on every restart or deploy (wait for a bounce
+// and keep guessing), did not exist across a second worker, and grew without
+// bound. Keyed per <email>|<org> so one account locks — not everyone sharing an
+// office IP.
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_SECONDS = 900; // 15 min
 
-function getFailedAttempts(id) {
-  let data = loginAttempts.get(id) || { count: 0, locked_until: 0 };
-  if (data.locked_until > 0 && Math.floor(Date.now() / 1000) > data.locked_until) {
-    data = { count: 0, locked_until: 0 };
-    loginAttempts.delete(id);
+// If the master DB is unreachable we still must not let guessing run free, so
+// fall back to an in-process counter for the life of the process.
+const memoryAttempts = new Map();
+
+async function getFailedAttempts(id) {
+  try {
+    const [rows] = await masterDb().execute(
+      `SELECT attempts,
+              GREATEST(0, TIMESTAMPDIFF(SECOND, NOW(), locked_until)) AS locked_for
+         FROM login_attempts WHERE login_id = ? LIMIT 1`,
+      [id]
+    );
+    const row = rows[0];
+    if (!row) return { count: 0, locked_for: 0 };
+    return { count: Number(row.attempts) || 0, locked_for: Number(row.locked_for) || 0 };
+  } catch {
+    const m = memoryAttempts.get(id) || { count: 0, locked_until: 0 };
+    const left = m.locked_until - Math.floor(Date.now() / 1000);
+    return { count: m.count, locked_for: Math.max(0, left) };
   }
-  return data;
 }
 
-function recordFailedAttempt(id) {
-  const data = getFailedAttempts(id);
-  data.count += 1;
-  if (data.count >= 5) data.locked_until = Math.floor(Date.now() / 1000) + 900; // 15 min
-  loginAttempts.set(id, data);
+async function recordFailedAttempt(id) {
+  try {
+    // NOTE: inside ON DUPLICATE KEY UPDATE, MySQL evaluates the assignments in
+    // order, so `attempts` in the second expression is the value ALREADY
+    // incremented by the first. Comparing `attempts + 1` here would therefore
+    // count one too many and lock the account on the 4th failure while the user
+    // was still being told "1 attempt remaining".
+    await masterDb().execute(
+      `INSERT INTO login_attempts (login_id, attempts, locked_until)
+            VALUES (?, 1, NULL)
+       ON DUPLICATE KEY UPDATE
+            attempts     = attempts + 1,
+            locked_until = IF(attempts >= ?, DATE_ADD(NOW(), INTERVAL ? SECOND), locked_until)`,
+      [id, MAX_ATTEMPTS, LOCKOUT_SECONDS]
+    );
+  } catch {
+    const m = memoryAttempts.get(id) || { count: 0, locked_until: 0 };
+    m.count += 1;
+    if (m.count >= MAX_ATTEMPTS) m.locked_until = Math.floor(Date.now() / 1000) + LOCKOUT_SECONDS;
+    memoryAttempts.set(id, m);
+  }
 }
 
-function clearFailedAttempts(id) {
-  loginAttempts.delete(id);
+async function clearFailedAttempts(id) {
+  try {
+    await masterDb().execute('DELETE FROM login_attempts WHERE login_id = ?', [id]);
+  } catch { /* best effort */ }
+  memoryAttempts.delete(id);
 }
 
 /** First-letters-of-first-two-words initials (PHP array_map over name words). */
@@ -62,7 +100,10 @@ function initialsFrom(name) {
  */
 export async function login({ email, password, orgSlug, host }) {
   email = String(email || '').trim();
-  password = String(password || '').trim();
+  // Deliberately NOT trimmed: the password must be compared exactly as the user
+  // set it. Trimming here while storing it untrimmed would silently lock out
+  // anyone whose password begins or ends with a space.
+  password = String(password ?? '');
   const cleanSlug = sanitizeSlug(orgSlug);
 
   if (!email || !password) throw badRequest('Email and password are required.');
@@ -70,13 +111,11 @@ export async function login({ email, password, orgSlug, host }) {
   const loginId = `${email.toLowerCase()}|${cleanSlug || 'default'}`;
 
   // Lockout check
-  const attempts = getFailedAttempts(loginId);
-  const now = Math.floor(Date.now() / 1000);
-  if (attempts.locked_until > 0 && now < attempts.locked_until) {
-    const waitSecs = attempts.locked_until - now;
+  const attempts = await getFailedAttempts(loginId);
+  if (attempts.locked_for > 0) {
     throw tooMany(
-      `Too many failed attempts. Please try again in ${Math.ceil(waitSecs / 60)} minute(s).`,
-      { retry_after: waitSecs }
+      `Too many failed attempts. Please try again in ${Math.ceil(attempts.locked_for / 60)} minute(s).`,
+      { retry_after: attempts.locked_for }
     );
   }
 
@@ -97,11 +136,13 @@ export async function login({ email, password, orgSlug, host }) {
         avatar_initials: initialsFrom(pa.name) || 'PA',
         points: 0,
       };
-      clearFailedAttempts(loginId);
+      await clearFailedAttempts(loginId);
       const token = signToken({ user: session, platform_admin: true });
+      logger.info(`auth: platform admin login ok (${email})`);
       return { user: session, token };
     }
   } catch (e) {
+    if (e instanceof ApiError) throw e;
     // ifqm_master unavailable — fall through to tenant auth (as PHP did)
     logger.warn('platform_admins lookup skipped', e.message);
   }
@@ -120,8 +161,10 @@ export async function login({ email, password, orgSlug, host }) {
   const user = rows[0];
 
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    recordFailedAttempt(loginId);
-    const remaining = Math.max(0, 5 - getFailedAttempts(loginId).count);
+    await recordFailedAttempt(loginId);
+    const after = await getFailedAttempts(loginId);
+    const remaining = Math.max(0, MAX_ATTEMPTS - after.count);
+    logger.warn(`auth: failed login for ${loginId} (${after.count}/${MAX_ATTEMPTS})`);
     const err =
       remaining > 0
         ? `Invalid email, password, or organization code. ${remaining} attempt(s) remaining.`
@@ -147,8 +190,9 @@ export async function login({ email, password, orgSlug, host }) {
     org_slug: tenant.slug,
   };
 
-  clearFailedAttempts(loginId);
+  await clearFailedAttempts(loginId);
   const token = signToken({ user: session, org_slug: tenant.slug });
+  logger.info(`auth: login ok (${email} @ ${tenant.slug})`);
   return { user: session, token };
 }
 
@@ -176,19 +220,22 @@ export async function forgotPassword({ email, orgSlug, host }) {
   const user = rows[0];
   if (!user) return generic;
 
-  // Invalidate existing tokens, then issue a new bcrypt-hashed token (1h TTL).
+  // Invalidate existing tokens, then issue a new one (1h TTL).
   await db.execute('DELETE FROM password_reset_tokens WHERE user_id = ?', [user.id]);
 
-  const token = crypto.randomBytes(32).toString('hex');
-  const hashedToken = bcrypt.hashSync(token, 10);
+  // Split token: <selector>.<verifier>. The selector is an indexed lookup so we
+  // run exactly ONE bcrypt compare. Previously verification bcrypt-compared the
+  // candidate against every unexpired row in the table, which let anyone burn
+  // arbitrary CPU by posting junk tokens.
+  const { token, selector, verifierHash } = makeResetToken();
   const expiresAt = new Date(Date.now() + 3600 * 1000)
     .toISOString()
     .slice(0, 19)
     .replace('T', ' ');
 
   await db.execute(
-    'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
-    [user.id, hashedToken, expiresAt]
+    'INSERT INTO password_reset_tokens (user_id, selector, token_hash, expires_at) VALUES (?, ?, ?, ?)',
+    [user.id, selector, verifierHash, expiresAt]
   );
 
   // Send the email if enabled/configured (best-effort; never leaks failure).
@@ -220,57 +267,103 @@ export async function forgotPassword({ email, orgSlug, host }) {
 
 /** Reset password given a valid, unexpired token. */
 export async function resetPassword({ token, password, orgSlug, host }) {
-  token = String(token || '').trim();
-  password = String(password || '').trim();
+  token = String(token || '');
+  password = String(password || '');
   const cleanSlug = sanitizeSlug(orgSlug);
 
   if (!token || !password) throw badRequest('Token and new password are required.');
-  if (password.length < 8) throw badRequest('Password must be at least 8 characters.');
+  assertPasswordStrength(password);
 
   const tenant = await resolveTenant({ slug: cleanSlug, host });
   const db = getTenantPool(tenant);
 
-  const [tokens] = await db.query(
-    'SELECT id, user_id, token_hash FROM password_reset_tokens WHERE expires_at > NOW()'
+  const matched = await findResetToken(db, token);
+  if (!matched) throw badRequest('Invalid or expired reset link. Please request a new one.');
+
+  const hash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
+
+  // Stamping password_changed_at is what actually kills the old sessions: the
+  // auth middleware rejects any JWT issued before this moment. Without it, a
+  // stolen token stayed usable for the rest of its 8-hour life even after the
+  // victim reset their password.
+  await db.execute(
+    'UPDATE users SET password_hash = ?, password_changed_at = NOW() WHERE id = ?',
+    [hash, matched.user_id]
   );
-  let matched = null;
-  for (const t of tokens) {
-    if (bcrypt.compareSync(token, t.token_hash)) {
-      matched = t;
-      break;
-    }
-  }
-  if (!matched) {
-    throw badRequest('Invalid or expired reset link. Please request a new one.');
-  }
+  // Burn every outstanding reset token for this user, not just the one used.
+  await db.execute('DELETE FROM password_reset_tokens WHERE user_id = ?', [matched.user_id]);
 
-  const hash = bcrypt.hashSync(password, 10);
-  await db.execute('UPDATE users SET password_hash = ? WHERE id = ?', [hash, matched.user_id]);
-  await db.execute('DELETE FROM password_reset_tokens WHERE id = ?', [matched.id]);
-
+  logger.info(`auth: password reset completed for user ${matched.user_id} @ ${tenant.slug}`);
   return { success: true, message: 'Password updated successfully. Please log in with your new password.' };
 }
 
 /** Check whether a reset token is still valid. */
 export async function checkResetToken({ token, orgSlug, host }) {
-  token = String(token || '').trim();
+  token = String(token || '');
   if (!token) throw badRequest('Token required.');
   const cleanSlug = sanitizeSlug(orgSlug);
 
   const tenant = await resolveTenant({ slug: cleanSlug, host });
   const db = getTenantPool(tenant);
 
-  const [tokens] = await db.query(
-    'SELECT token_hash FROM password_reset_tokens WHERE expires_at > NOW()'
+  const matched = await findResetToken(db, token);
+  return { success: true, valid: !!matched };
+}
+
+// ── Reset-token helpers ─────────────────────────────────────────────────────
+const BCRYPT_ROUNDS = 12; // ~250ms; was 10
+
+/** Mint a `<selector>.<verifier>` reset token. Only the verifier is hashed. */
+function makeResetToken() {
+  const selector = crypto.randomBytes(16).toString('hex'); // 32 chars, indexed
+  const verifier = crypto.randomBytes(32).toString('hex'); // the actual secret
+  return {
+    token: `${selector}.${verifier}`,
+    selector,
+    verifierHash: bcrypt.hashSync(verifier, BCRYPT_ROUNDS),
+  };
+}
+
+/** Look a token up by selector (one indexed row → one bcrypt compare). */
+async function findResetToken(db, token) {
+  const dot = token.indexOf('.');
+  if (dot < 1) return null;
+  const selector = token.slice(0, dot);
+  const verifier = token.slice(dot + 1);
+  if (!/^[a-f0-9]{32}$/.test(selector) || !verifier) return null;
+
+  const [rows] = await db.execute(
+    'SELECT id, user_id, token_hash FROM password_reset_tokens WHERE selector = ? AND expires_at > NOW() LIMIT 1',
+    [selector]
   );
-  let valid = false;
-  for (const t of tokens) {
-    if (bcrypt.compareSync(token, t.token_hash)) {
-      valid = true;
-      break;
-    }
+  const row = rows[0];
+  if (!row) return null;
+  return bcrypt.compareSync(verifier, row.token_hash) ? row : null;
+}
+
+/**
+ * One password policy for every path that sets a password (self-service reset,
+ * admin-created accounts, new tenant admins). Length is the control that
+ * actually matters (NIST SP 800-63B); we additionally reject the handful of
+ * passwords that show up first in every credential-stuffing list.
+ */
+const WORST_PASSWORDS = new Set([
+  'password', 'password1', 'password123', '12345678', '123456789', '1234567890',
+  'qwertyuiop', 'letmein123', 'welcome123', 'admin123', 'iloveyou', 'changeme',
+  'ifqm1234', 'ifqm@1234', 'passw0rd', 'p@ssw0rd', 'administrator',
+]);
+
+export function assertPasswordStrength(password, { label = 'Password' } = {}) {
+  const pw = String(password ?? '');
+  const min = config.minPasswordLength;
+
+  if (pw.length < min) throw badRequest(`${label} must be at least ${min} characters.`);
+  if (pw.length > 200) throw badRequest(`${label} is too long (max 200 characters).`);
+  if (WORST_PASSWORDS.has(pw.toLowerCase())) {
+    throw badRequest(`${label} is one of the most commonly guessed passwords. Choose another.`);
   }
-  return { success: true, valid };
+  if (/^(.)\1+$/.test(pw)) throw badRequest(`${label} cannot be a single repeated character.`);
+  return pw;
 }
 
 function escapeHtml(s) {
@@ -279,4 +372,4 @@ function escapeHtml(s) {
   );
 }
 
-export default { login, forgotPassword, resetPassword, checkResetToken };
+export default { login, forgotPassword, resetPassword, checkResetToken, assertPasswordStrength };
