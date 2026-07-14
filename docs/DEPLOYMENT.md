@@ -318,3 +318,56 @@ Being straight about what this hardening pass did **not** cover:
 7. **GDPR/DPDP:** there is no "export my data" or "delete my account" flow.
    Deleting a user who has submitted ideas deactivates them instead, to preserve
    authorship. Confirm this matches the company's retention policy.
+
+---
+
+## 9. Bulk employee import (org admin)
+
+**Admin → User List → Bulk Import.** Migrations `002_bulk_user_import.sql` must be
+applied to every tenant schema first.
+
+**Flow:** download template → fill one row per employee → upload → review a dry-run
+preview (nothing is written) → confirm. Accounts are created as a background job;
+the UI polls it. ~1,000 employees take about 13 seconds; 10,000 take roughly two
+minutes, and the app stays fully responsive throughout.
+
+### The first-time password — read this
+
+Each imported employee gets a temporary password: **the first 4 letters of their
+name (lowercase) + their year of birth.** `Asha Rao`, born 1994 → `asha1994`.
+
+**This is guessable by any colleague who knows their birthday.** It is a bootstrap
+credential, not a password. It is made safe by being short-lived:
+
+- `must_change_password` is set, and **the server refuses every other endpoint**
+  until it is replaced (enforced in the auth middleware, not by a UI redirect — so
+  it cannot be bypassed by calling the API directly).
+- Changing it revokes every token issued beforehand.
+- Until an employee signs in, the Admin → User List shows them as
+  **"Not signed in yet"**. Those are the accounts still holding a guessable
+  password — chase them.
+
+Tell staff to sign in promptly. If you would rather not have guessable passwords at
+all, the alternative is random passwords that the admin must distribute
+individually; that is a change to `tempPasswordFor()` in
+`backend/src/services/userImportService.js`.
+
+### What the import will and will not do
+
+| | |
+|---|---|
+| **Never modifies an existing user.** | A row whose `employee_id` or `email` already exists is **skipped** and reported. An upload can never overwrite somebody's role or reset their password. Re-uploading the same file is therefore safe. |
+| **Cannot escalate privileges.** | Every row's role is checked against what *that* admin may assign. An org admin typing `admin` or `super_admin` into a cell gets the row rejected. Only a super admin can create an `admin`. |
+| **Rejects circular reporting lines.** | A→B→A would send the org-chart screen into infinite recursion. Such rows are refused. |
+| **All-or-nothing.** | The valid rows are inserted in one transaction. If it fails, nothing is created — there is no half-imported state to clean up. |
+
+Rejected rows are listed in the preview and downloadable as a CSV. Fix them and
+upload again; the employees already created will simply be skipped.
+
+Limits: 20,000 rows and 15 MB per file.
+
+### Note on the org chart
+
+Super Admin → Hierarchy draws a node per employee. Past ~1,500 people it stops
+drawing the full tree (it would lock the browser up) and tells you to search in the
+Users tab instead. The counts stay accurate.

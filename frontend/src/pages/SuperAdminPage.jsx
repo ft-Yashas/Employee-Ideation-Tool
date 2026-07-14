@@ -179,6 +179,15 @@ export default function SuperAdminPage() {
       {/* Hierarchy */}
       {tab === 1 && (
         <div className="card" style={{ marginTop:16 }}>
+          {/* Bulk import can put thousands of employees in a tenant. The org
+              chart renders a node per person and recurses through the reporting
+              lines, so past a few thousand it simply locks the tab up. Say so
+              instead of hanging. */}
+          {data.truncated && (
+            <div className="alert alert-warning" style={{ marginBottom:12,fontSize:12,lineHeight:1.6 }}>
+              {t('sa.too_many_tree', { shown: data.limit, total: data.stats?.total ?? 0 })}
+            </div>
+          )}
           <div id="hierarchy-tree">
             {roots.length
               ? roots.map(n => renderHierarchyNode(n, 0, t))

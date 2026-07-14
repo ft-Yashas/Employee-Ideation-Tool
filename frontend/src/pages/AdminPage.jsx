@@ -5,12 +5,21 @@ import { useToast } from '../context/ToastContext';
 import { usersApi, ideasApi, settingsApi, scoreApi } from '../services/api';
 import { formatRole, statusBadge, translateStatus, fmtDate } from '../utils/helpers';
 import IdeaDetailModal from '../components/IdeaDetailModal';
+import BulkImportModal from '../components/BulkImportModal';
 
+/*
+ * React's `style` prop takes an object, not a CSS string. These were strings
+ * ('background:#c8ccd1;color:#374151;...'), so rendering one threw
+ * "The `style` prop expects a mapping from style properties to values, not a
+ * string" — which crashed the whole component. That is why the Admin → User List
+ * tab rendered as a blank page for any organisation that had users (i.e. always:
+ * the org admin themselves matches `admin`).
+ */
 const ROLE_BADGE_STYLE = {
-  admin:     'background:#c8ccd1;color:#374151;border:1px solid #6b7280',
-  executive: 'background:#c8ccd1;color:#4b5563;border:1px solid #9ca3af',
-  manager:   'background:#fef3c7;color:#92400e;border:1px solid #fde68a',
-  employee:  'background:#a7f3d0;color:#065f46;border:1px solid #a7f3d0',
+  admin:     { background:'#c8ccd1', color:'#374151', border:'1px solid #6b7280' },
+  executive: { background:'#c8ccd1', color:'#4b5563', border:'1px solid #9ca3af' },
+  manager:   { background:'#fef3c7', color:'#92400e', border:'1px solid #fde68a' },
+  employee:  { background:'#a7f3d0', color:'#065f46', border:'1px solid #a7f3d0' },
 };
 
 const TAB_KEYS = ['admin.tab_overview','admin.tab_ideas','admin.tab_users','admin.tab_system'];
@@ -27,11 +36,14 @@ export default function AdminPage() {
   const [ideasStatus, setIdeasStatus] = useState('');
   const [users,       setUsers]       = useState([]);
   const [usersSearch, setUsersSearch] = useState('');
+  const [userPage,    setUserPage]    = useState(1);
+  const [userMeta,    setUserMeta]    = useState({ total: 0, pages: 1 });
   const [managers,    setManagers]    = useState([]);
   const [settings,    setSettings]    = useState(null);
   const [loading,     setLoading]     = useState(false);
   const [openIdeaId,  setOpenIdeaId]  = useState(null);
   const [showUserForm,setShowUserForm]= useState(false);
+  const [showImport,  setShowImport]  = useState(false);
   const [editUser,    setEditUser]    = useState(null);
   const [rescoreMsg,  setRescoreMsg]  = useState('');
   const [settingsMsg, setSettingsMsg] = useState('');
@@ -39,9 +51,18 @@ export default function AdminPage() {
   useEffect(() => {
     if (tab === 0) loadDash();
     if (tab === 1) loadIdeas();
-    if (tab === 2) loadUsers();
     if (tab === 3) loadSettings();
   }, [tab]);
+
+  // The user list is searched and paged on the SERVER — a tenant can hold
+  // 10,000 employees after a bulk import, so it can no longer be filtered
+  // client-side over a full in-memory copy. Debounced so typing doesn't fire a
+  // request per keystroke.
+  useEffect(() => {
+    if (tab !== 2) return undefined;
+    const id = setTimeout(() => { loadUsers(); }, usersSearch ? 300 : 0);
+    return () => clearTimeout(id);
+  }, [tab, usersSearch, userPage]);
 
   async function loadDash() {
     try {
@@ -58,14 +79,17 @@ export default function AdminPage() {
   }
 
   async function loadUsers() {
+    setLoading(true);
     try {
       const [uRes, mRes] = await Promise.all([
-        usersApi.adminList(),
+        usersApi.adminList({ q: usersSearch, page: userPage, limit: 25 }),
         usersApi.managers(),
       ]);
       setUsers(uRes.data.users || []);
+      setUserMeta({ total: uRes.data.total ?? 0, pages: uRes.data.pages ?? 1 });
       setManagers(mRes.data.managers || []);
     } catch {}
+    setLoading(false);
   }
 
   async function loadSettings() {
@@ -126,11 +150,8 @@ export default function AdminPage() {
            (!ideasStatus || i.status === ideasStatus);
   });
 
-  const filteredUsers = users.filter(u => {
-    const q = usersSearch.toLowerCase();
-    return !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.employee_id||'').toLowerCase().includes(q);
-  });
-
+  // `users` already arrives searched and paged from the server — filtering it
+  // again here would only hide rows from the current page.
   const counts = dash?.counts || {};
 
   return (
@@ -202,10 +223,17 @@ export default function AdminPage() {
       {/* User List */}
       {tab === 2 && (
         <div>
-          <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:16,marginBottom:12 }}>
+          <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:16,marginBottom:12,gap:10,flexWrap:'wrap' }}>
             <input className="form-control" type="search" placeholder={t('filter.search_users')}
-              value={usersSearch} onChange={e => setUsersSearch(e.target.value)} style={{ maxWidth:280 }} id="admin-user-search" />
-            <button className="btn btn-primary btn-sm" onClick={() => { setEditUser(null); setShowUserForm(true); }}>{t('btn.add_user')}</button>
+              value={usersSearch}
+              onChange={e => { setUsersSearch(e.target.value); setUserPage(1); }}
+              style={{ maxWidth:280 }} id="admin-user-search" />
+            <div style={{ display:'flex',gap:8 }}>
+              <button className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>
+                ⬆ {t('imp.button')}
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={() => { setEditUser(null); setShowUserForm(true); }}>{t('btn.add_user')}</button>
+            </div>
           </div>
           <div className="card" style={{ overflowX:'auto' }}>
             <table className="table">
@@ -213,8 +241,8 @@ export default function AdminPage() {
                 <tr><th>{t('table.user')}</th><th>{t('table.role')}</th><th>{t('table.dept')}</th><th>{t('table.manager')}</th><th>{t('table.points')}</th><th>{t('table.status')}</th><th></th></tr>
               </thead>
               <tbody id="admin-users-tbody">
-                {!filteredUsers.length && <tr><td colSpan="7" className="text-center">{t('admin.no_users')}</td></tr>}
-                {filteredUsers.map(u => {
+                {!users.length && <tr><td colSpan="7" className="text-center">{t('admin.no_users')}</td></tr>}
+                {users.map(u => {
                   const isProtected = u.role === 'super_admin' || u.id === user?.id;
                   return (
                     <tr key={u.id}>
@@ -227,7 +255,7 @@ export default function AdminPage() {
                           </div>
                         </div>
                       </td>
-                      <td><span className="badge" style={ROLE_BADGE_STYLE[u.role]||''}>{formatRole(u.role, t)}</span></td>
+                      <td><span className="badge" style={ROLE_BADGE_STYLE[u.role]}>{formatRole(u.role, t)}</span></td>
                       <td style={{ fontSize:12 }}>{u.department||'–'}</td>
                       <td style={{ fontSize:12,color:'var(--subtle)' }}>{u.manager_name||'–'}</td>
                       <td><strong>{u.points}</strong></td>
@@ -238,6 +266,16 @@ export default function AdminPage() {
                           borderColor:u.status==='inactive'?'#fca5a5':'#bbf7d0' }}>
                           {t(u.status==='inactive' ? 'admin.inactive' : 'admin.active')}
                         </span>
+                        {/* Imported and never signed in: their password is still
+                            the derived one, i.e. guessable. Worth chasing. */}
+                        {!!u.must_change_password && (
+                          <div style={{ marginTop:3 }}>
+                            <span title={t('imp.pending_hint')} style={{ fontSize:10,padding:'1px 8px',borderRadius:99,
+                              background:'#fef3c7',color:'#92400e',border:'1px solid #fde68a' }}>
+                              {t('imp.pending')}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td>
                         {isProtected
@@ -256,6 +294,27 @@ export default function AdminPage() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Pager. With 10,000 employees the list is no longer something the
+              browser can hold all of, so paging is not cosmetic. */}
+          <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:12,gap:10 }}>
+            <span style={{ fontSize:12,color:'var(--subtle)' }}>
+              {t('imp.showing', {
+                from: userMeta.total ? (userPage - 1) * 25 + 1 : 0,
+                to: Math.min(userPage * 25, userMeta.total),
+                total: userMeta.total,
+              })}
+            </span>
+            <div style={{ display:'flex',gap:6,alignItems:'center' }}>
+              <button className="btn btn-outline btn-sm" disabled={userPage <= 1 || loading}
+                onClick={() => setUserPage(p => Math.max(1, p - 1))}>← {t('btn.back')}</button>
+              <span style={{ fontSize:12,color:'var(--subtle)',minWidth:70,textAlign:'center' }}>
+                {userPage} / {userMeta.pages || 1}
+              </span>
+              <button className="btn btn-outline btn-sm" disabled={userPage >= (userMeta.pages || 1) || loading}
+                onClick={() => setUserPage(p => p + 1)}>{t('btn.next')} →</button>
+            </div>
           </div>
         </div>
       )}
@@ -325,6 +384,13 @@ export default function AdminPage() {
       )}
 
       {openIdeaId && <IdeaDetailModal ideaId={openIdeaId} onClose={() => { setOpenIdeaId(null); loadIdeas(); }} />}
+
+      {showImport && (
+        <BulkImportModal
+          onClose={() => setShowImport(false)}
+          onImported={() => { setUserPage(1); loadUsers(); }}
+        />
+      )}
 
       {showUserForm && (
         <UserFormModal

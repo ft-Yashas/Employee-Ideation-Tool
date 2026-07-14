@@ -56,6 +56,7 @@ async function loadLiveUser(req, payload) {
     // straight back out of the session they just reset.
     `SELECT u.id, u.employee_id, u.name, u.email, u.phone, u.department, u.business_unit,
             u.location, u.role, u.manager_id, u.points, u.avatar_initials, u.status,
+            u.must_change_password,
             UNIX_TIMESTAMP(u.password_changed_at) AS password_changed_ts,
             m.name AS manager_name
        FROM users u
@@ -68,11 +69,25 @@ async function loadLiveUser(req, payload) {
   if (!row) throw unauthorized('Your account no longer exists.');
   if (row.status !== 'active') throw unauthorized('Your account has been deactivated.');
 
-  // Tokens minted before the last password change are dead. `iat` is in whole
-  // seconds, so allow a small skew rather than logging a user out of the very
-  // session they just reset the password from.
-  const changedAt = Number(row.password_changed_ts);
-  if (Number.isFinite(changedAt) && changedAt > 0 && payload.iat && payload.iat + 2 < changedAt) {
+  /*
+   * Tokens issued before the last password change are dead.
+   *
+   * This deliberately does NOT compare the token's `iat` against the change
+   * time. That approach cannot work: a token minted one second before the
+   * change and the replacement token minted zero seconds after it are
+   * indistinguishable at whole-second resolution, so any skew tolerance wide
+   * enough to protect the new token also lets the old one survive. (It did —
+   * an old token kept working right through a password change.) It is also at
+   * the mercy of clock drift between Node and MySQL.
+   *
+   * Instead the token carries `pwd_ts`: the value of password_changed_at, read
+   * from the database, at the moment the token was issued. If the row's current
+   * value differs, the password has changed since — so the token is stale, full
+   * stop. Exact, and immune to clock skew because both sides come from the DB.
+   */
+  const rowPwdTs = Number(row.password_changed_ts) || 0;
+  const tokenPwdTs = Number(payload.pwd_ts) || 0;
+  if (rowPwdTs !== tokenPwdTs) {
     throw new ApiError(401, 'Session expired', { expired: true });
   }
 
@@ -91,9 +106,40 @@ async function loadLiveUser(req, payload) {
     points: row.points,
     avatar_initials: row.avatar_initials,
     status: row.status,
+    must_change_password: !!row.must_change_password,
     org_name: req.tenant?.name,
     org_slug: req.tenant?.slug,
   };
+}
+
+/**
+ * Endpoints a user still holding a temporary password is allowed to reach.
+ * Everything else is refused until they have chosen a real one.
+ */
+const PASSWORD_CHANGE_ALLOWED = [
+  '/api/auth/change-password',
+  '/api/auth/logout',
+  '/api/auth/me',
+];
+
+/**
+ * Bulk-imported employees start with a derived temporary password
+ * ("asha1994" — first 4 letters of the name + birth year). That is guessable by
+ * any colleague, so it is only ever a bootstrap credential.
+ *
+ * This gate is what makes that acceptable: until the password is replaced, the
+ * session can do nothing except change it. Enforcing it here rather than with a
+ * redirect in React is the whole point — a UI redirect is bypassed by anyone who
+ * calls the API directly with the token they just received.
+ */
+function enforcePasswordChange(req) {
+  if (!req.user?.must_change_password) return;
+  const path = (req.originalUrl || '').split('?')[0];
+  if (PASSWORD_CHANGE_ALLOWED.some((p) => path === p || path.startsWith(p + '/'))) return;
+
+  throw new ApiError(403, 'You must set a new password before continuing.', {
+    must_change_password: true,
+  });
 }
 
 /**
@@ -175,6 +221,8 @@ export const requireAuth = asyncHandler(async (req, _res, next) => {
     await attachTenantDb(req, payload.org_slug);
     // Authoritative role/status come from the DB, not the 8-hour-old token.
     req.user = await loadLiveUser(req, payload);
+    // A user still on their temporary password may only change it.
+    enforcePasswordChange(req);
   }
   next();
 });

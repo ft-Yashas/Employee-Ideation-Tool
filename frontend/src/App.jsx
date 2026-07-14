@@ -4,6 +4,7 @@ import { ToastProvider } from './context/ToastContext';
 import { LangProvider } from './context/LangContext';
 import { NotifProvider } from './context/NotifContext';
 import LoginPage from './pages/LoginPage';
+import ForcePasswordChangePage from './pages/ForcePasswordChangePage';
 import AppShell from './components/Layout/AppShell';
 import DashboardPage from './pages/DashboardPage';
 import MyIdeasPage from './pages/MyIdeasPage';
@@ -30,6 +31,13 @@ function PrivateRoute({ children }) {
     </div>
   );
   if (!user) return <Navigate to="/" replace />;
+
+  // A bulk-imported employee signs in with a temporary password derived from
+  // their name and birth year — guessable by any colleague. Until they replace
+  // it, this is the only screen they get. The server enforces the same rule
+  // (every other endpoint 403s), so this is for their benefit, not for security.
+  if (user.must_change_password) return <ForcePasswordChangePage />;
+
   // Platform admin can only access /platform routes
   if (user.role === 'platform_admin' && !location.pathname.startsWith('/platform')) {
     return <Navigate to="/platform" replace />;

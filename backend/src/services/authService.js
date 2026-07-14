@@ -152,7 +152,11 @@ export async function login({ email, password, orgSlug, host }) {
   const db = getTenantPool(tenant);
 
   const [rows] = await db.execute(
-    `SELECT u.*, m.name AS manager_name
+    // password_changed_ts is stamped into the token (see signSession) so the
+    // auth middleware can tell a current session from one opened before the
+    // password last changed — without comparing clocks.
+    `SELECT u.*, UNIX_TIMESTAMP(u.password_changed_at) AS password_changed_ts,
+            m.name AS manager_name
        FROM users u
        LEFT JOIN users m ON m.id = u.manager_id
       WHERE u.email = ? AND u.status = 'active' LIMIT 1`,
@@ -186,12 +190,21 @@ export async function login({ email, password, orgSlug, host }) {
     manager_name: user.manager_name,
     points: user.points,
     avatar_initials: user.avatar_initials || (user.name || '').charAt(0).toUpperCase(),
+    // Bulk-imported employees sign in with a derived temporary password and can
+    // do nothing else until they replace it (enforced server-side in the auth
+    // middleware). The flag rides along so the UI can show the change screen
+    // immediately rather than bouncing off a 403.
+    must_change_password: !!user.must_change_password,
     org_name: tenant.name,
     org_slug: tenant.slug,
   };
 
   await clearFailedAttempts(loginId);
-  const token = signToken({ user: session, org_slug: tenant.slug });
+  const token = signToken({
+    user: session,
+    org_slug: tenant.slug,
+    pwd_ts: Number(user.password_changed_ts) || 0,
+  });
   logger.info(`auth: login ok (${email} @ ${tenant.slug})`);
   return { user: session, token };
 }
@@ -310,6 +323,75 @@ export async function checkResetToken({ token, orgSlug, host }) {
   return { success: true, valid: !!matched };
 }
 
+/**
+ * Change the password of the signed-in user.
+ *
+ * Used both for a normal voluntary change and for the forced change that a
+ * bulk-imported employee must complete on first login.
+ *
+ * Returns a FRESH token. Stamping password_changed_at is what revokes tokens
+ * issued before the change — including the one the caller is holding right now —
+ * so without reissuing here the user would be logged out by the very act of
+ * securing their account.
+ */
+export async function changePassword(db, user, { currentPassword, newPassword, orgSlug }) {
+  currentPassword = String(currentPassword ?? '');
+  newPassword = String(newPassword ?? '');
+
+  if (!currentPassword || !newPassword) {
+    throw badRequest('Current and new password are required.');
+  }
+
+  const [rows] = await db.execute(
+    'SELECT id, password_hash, must_change_password FROM users WHERE id = ? AND status = \'active\' LIMIT 1',
+    [user.id]
+  );
+  const row = rows[0];
+  if (!row) throw unauthorized('Your account is no longer active.');
+
+  // Verify the current password even during a forced change: possession of a
+  // token alone must not be enough to overwrite the credential.
+  if (!bcrypt.compareSync(currentPassword, row.password_hash)) {
+    throw badRequest('Your current password is incorrect.');
+  }
+
+  // The new password gets the full policy — the temporary one was exempt
+  // precisely because it was temporary.
+  assertPasswordStrength(newPassword, { label: 'New password' });
+
+  if (bcrypt.compareSync(newPassword, row.password_hash)) {
+    throw badRequest('The new password must be different from your current one.');
+  }
+
+  const hash = bcrypt.hashSync(newPassword, BCRYPT_ROUNDS);
+  await db.execute(
+    `UPDATE users
+        SET password_hash = ?, password_changed_at = NOW(), must_change_password = 0,
+            activated_at = COALESCE(activated_at, NOW())
+      WHERE id = ?`,
+    [hash, user.id]
+  );
+
+  // Read the stamp back rather than assuming what NOW() produced — this value
+  // must match the row exactly or the fresh token below would be rejected by
+  // the middleware as stale.
+  const [after] = await db.execute(
+    'SELECT UNIX_TIMESTAMP(password_changed_at) AS pwd_ts FROM users WHERE id = ?',
+    [user.id]
+  );
+  const pwdTs = Number(after[0]?.pwd_ts) || 0;
+
+  logger.info(`auth: password changed for user ${user.id}`);
+
+  // Reissue. The stamp above invalidated every token issued earlier — including
+  // the one the caller used to make this request — so without a fresh token the
+  // user would be logged out by the very act of securing their account.
+  const session = { ...user, must_change_password: false };
+  const token = signToken({ user: session, org_slug: orgSlug || user.org_slug, pwd_ts: pwdTs });
+
+  return { success: true, message: 'Password updated.', token, user: session };
+}
+
 // ── Reset-token helpers ─────────────────────────────────────────────────────
 const BCRYPT_ROUNDS = 12; // ~250ms; was 10
 
@@ -372,4 +454,6 @@ function escapeHtml(s) {
   );
 }
 
-export default { login, forgotPassword, resetPassword, checkResetToken, assertPasswordStrength };
+export default {
+  login, forgotPassword, resetPassword, checkResetToken, changePassword, assertPasswordStrength,
+};

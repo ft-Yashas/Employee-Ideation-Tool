@@ -20,7 +20,15 @@ const ROLES_ADMIN_CAN_ASSIGN = [
 ];
 const ROLES_SUPER_ADMIN_CAN_ASSIGN = [...ROLES_ADMIN_CAN_ASSIGN, 'admin'];
 
-const assignableRoles = (actorRole) =>
+/**
+ * The single source of truth for "which roles may this actor hand out".
+ *
+ * Exported so the bulk importer enforces the SAME rule as single-user creation.
+ * A tenant admin must not be able to mint another `admin` (or a `super_admin`)
+ * by typing it into a spreadsheet cell — the import validates every row's role
+ * through this function, so escalation via import is impossible by construction.
+ */
+export const assignableRoles = (actorRole) =>
   actorRole === 'super_admin' ? ROLES_SUPER_ADMIN_CAN_ASSIGN : ROLES_ADMIN_CAN_ASSIGN;
 
 /**
@@ -51,16 +59,59 @@ export async function list(db, actor, q) {
   return { success: true, users: rows };
 }
 
-/** GET action=admin_users — full user list for admin console. */
-export async function adminUsers(db) {
-  const [rows] = await db.query(
+/**
+ * GET action=admin_users — the admin console's user list.
+ *
+ * Paginated and searched in SQL. It used to return every user in the tenant in
+ * one payload, which was fine for the dozens of accounts an admin created by
+ * hand — but bulk import can put 10,000 employees in here, and shipping all of
+ * them to the browser (and rendering every row) would hang the very page the
+ * admin lands on straight after importing.
+ *
+ * The response still includes `users`, so an older client keeps working; it just
+ * gets the first page.
+ */
+export async function adminUsers(db, { q = '', page = 1, limit = 50 } = {}) {
+  const search = String(q || '').trim();
+  const perPage = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+  const offset = (pageNum - 1) * perPage;
+
+  const where = [];
+  const params = [];
+  if (search) {
+    where.push('(u.name LIKE ? OR u.email LIKE ? OR u.employee_id LIKE ?)');
+    const like = `%${search}%`;
+    params.push(like, like, like);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const [countRows] = await db.execute(
+    `SELECT COUNT(*) AS total FROM users u ${whereSql}`,
+    params
+  );
+  const total = Number(countRows[0]?.total || 0);
+
+  const [rows] = await db.execute(
     `SELECT u.id, u.employee_id, u.name, u.department, u.business_unit, u.location,
             u.email, u.role, u.avatar_initials, u.points, u.status, u.manager_id,
+            u.must_change_password, u.activated_at,
             m.name AS manager_name
        FROM users u LEFT JOIN users m ON m.id=u.manager_id
-      ORDER BY FIELD(u.role,'admin','executive','senior_manager','manager','project_lead','team_lead','employee','trainee'), u.name`
+       ${whereSql}
+      ORDER BY FIELD(u.role,'admin','executive','senior_manager','manager','project_lead','team_lead','employee','trainee'), u.name
+      LIMIT ? OFFSET ?`,
+    [...params, perPage, offset]
   );
-  return { success: true, users: rows };
+
+  return {
+    success: true,
+    users: rows,
+    total,
+    page: pageNum,
+    limit: perPage,
+    pages: Math.max(1, Math.ceil(total / perPage)),
+  };
 }
 
 /** POST action=create_user. */
@@ -182,27 +233,57 @@ export async function managers(db) {
 }
 
 /** GET action=hierarchy — org tree data + role stats (super_admin only). */
+/**
+ * Number of people the org-chart screen will render before it gives up.
+ *
+ * The chart is a recursive tree in the browser; bulk import can put 10,000
+ * employees in a tenant, and rendering a DOM node per person (plus the recursion)
+ * would lock the tab up. Past this many users the screen shows the counts and
+ * asks the admin to search instead of drawing the whole org.
+ */
+const HIERARCHY_MAX = 1500;
+
 export async function hierarchy(db) {
-  const [users] = await db.query(
+  // Counts come from an aggregate, so they stay correct even when the user list
+  // below is truncated.
+  const [statRows] = await db.query(
+    `SELECT role, COUNT(*) AS cnt FROM users WHERE role != 'super_admin' GROUP BY role`
+  );
+  const stats = { total: 0, admins: 0, managers: 0, employees: 0, executives: 0 };
+  for (const r of statRows) {
+    const n = Number(r.cnt) || 0;
+    stats.total += n;
+    const key = `${r.role}s`;
+    if (Object.prototype.hasOwnProperty.call(stats, key)) stats[key] += n;
+  }
+
+  // The old query ran a correlated COUNT subquery per user — 10,000 users meant
+  // 10,000 subqueries. One grouped join instead.
+  const [users] = await db.execute(
     `SELECT u.id, u.employee_id, u.name, u.email, u.department, u.business_unit,
             u.location, u.role, u.manager_id, u.points, u.avatar_initials,
             m.name AS manager_name,
-            (SELECT COUNT(*) FROM ideas WHERE submitter_id = u.id AND status != 'Draft') AS idea_count
+            COALESCE(i.cnt, 0) AS idea_count
        FROM users u
        LEFT JOIN users m ON m.id = u.manager_id
+       LEFT JOIN (
+         SELECT submitter_id, COUNT(*) AS cnt
+           FROM ideas WHERE status != 'Draft' GROUP BY submitter_id
+       ) i ON i.submitter_id = u.id
       WHERE u.role != 'super_admin'
-      ORDER BY FIELD(u.role,'admin','executive','senior_manager','manager','project_lead','team_lead','employee','trainee'), u.name`
+      ORDER BY FIELD(u.role,'admin','executive','senior_manager','manager','project_lead','team_lead','employee','trainee'), u.name
+      LIMIT ?`,
+    [HIERARCHY_MAX + 1]
   );
 
-  // Stats keyed by role+'s' — only admins/managers/employees/executives are
-  // tracked (identical to PHP; other roles increment total only).
-  const stats = { total: 0, admins: 0, managers: 0, employees: 0, executives: 0 };
-  for (const u of users) {
-    stats.total++;
-    const key = `${u.role}s`;
-    if (Object.prototype.hasOwnProperty.call(stats, key)) stats[key]++;
-  }
-  return { success: true, users, stats };
+  const truncated = users.length > HIERARCHY_MAX;
+  return {
+    success: true,
+    users: truncated ? users.slice(0, HIERARCHY_MAX) : users,
+    stats,
+    truncated,
+    limit: HIERARCHY_MAX,
+  };
 }
 
 /** POST action=profile — update own phone. */

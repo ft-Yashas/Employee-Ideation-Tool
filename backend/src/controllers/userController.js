@@ -11,7 +11,11 @@ export const list = asyncHandler(async (req, res) =>
 );
 
 export const adminUsers = asyncHandler(async (req, res) =>
-  respond(res, await userService.adminUsers(req.db))
+  respond(res, await userService.adminUsers(req.db, {
+    q: req.query.q,
+    page: req.query.page,
+    limit: req.query.limit,
+  }))
 );
 
 export const createUser = asyncHandler(async (req, res) =>

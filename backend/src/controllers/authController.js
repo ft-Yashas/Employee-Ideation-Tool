@@ -65,4 +65,21 @@ export const checkResetToken = asyncHandler(async (req, res) => {
   return respond(res, result);
 });
 
-export default { me, login, logout, forgotPassword, resetPassword, checkResetToken };
+/**
+ * POST /api/auth/change-password — signed-in password change.
+ *
+ * Also the exit route from the forced change a bulk-imported employee faces on
+ * first login. Returns a new token: stamping password_changed_at revokes every
+ * token issued before it, including the caller's.
+ */
+export const changePassword = asyncHandler(async (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  const result = await authService.changePassword(req.db, req.user, {
+    currentPassword: current_password,
+    newPassword: new_password,
+    orgSlug: req.auth?.org_slug,
+  });
+  return respond(res, result);
+});
+
+export default { me, login, logout, forgotPassword, resetPassword, checkResetToken, changePassword };

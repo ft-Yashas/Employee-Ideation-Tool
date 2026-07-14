@@ -2,7 +2,13 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
-  headers: { 'Content-Type': 'application/json' },
+  // Deliberately NO default Content-Type. axios already sets
+  // `application/json` for plain-object bodies, and pinning it here forced that
+  // value onto multipart uploads too — a FormData body must be sent as
+  // `multipart/form-data; boundary=…`, and only the browser knows the boundary
+  // it generated. With the boundary missing the server cannot split the parts,
+  // so multer saw no file at all and every upload failed with "No file
+  // uploaded." (See the FormData branch in the request interceptor below.)
 });
 
 // Attach JWT token from localStorage
@@ -13,14 +19,49 @@ api.interceptors.request.use((config) => {
   if (org && !config.params?.org_slug) {
     config.params = { ...config.params, org_slug: org };
   }
+
+  /*
+   * Belt and braces for multipart: make sure nothing has pinned a Content-Type
+   * on a FormData body, so the browser is free to set
+   * `multipart/form-data; boundary=…` itself. axios v1 stores headers in an
+   * AxiosHeaders object, where a bare `delete headers['Content-Type']` does not
+   * reliably remove a value inherited from the instance defaults — use its own
+   * API when it is available.
+   */
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    if (typeof config.headers?.delete === 'function') {
+      config.headers.delete('Content-Type');
+    } else {
+      delete config.headers['Content-Type'];
+      delete config.headers['content-type'];
+    }
+  }
   return config;
 });
 
-// Attach org_slug to non-GET requests via the request body
+// Attach org_slug to non-GET requests via the request body.
 api.interceptors.request.use((config) => {
   if (['post','put','patch','delete'].includes(config.method)) {
     const org = localStorage.getItem('ifqm_org');
-    if (org && config.data && typeof config.data === 'object' && !config.data.org_slug) {
+
+    /*
+     * A FormData body must be left completely alone.
+     *
+     * This used to run for every object body, and `typeof formData === 'object'`
+     * is true — so an upload hit the line below and became
+     * `{ ...formData, org_slug }`. Spreading a FormData yields `{}` (its entries
+     * live behind an iterator, not as enumerable own properties), so the body
+     * was quietly replaced with a plain `{ org_slug: 'jain' }` object and THE
+     * FILE WAS DISCARDED before the request ever left the browser. The server
+     * then reported "No file uploaded" for a request that looked, to the user,
+     * like it had a file attached. Idea attachments were broken by this too.
+     *
+     * FormData does not need it anyway: the interceptor above already puts
+     * org_slug in the query string for every request.
+     */
+    const isFormData = typeof FormData !== 'undefined' && config.data instanceof FormData;
+
+    if (org && !isFormData && config.data && typeof config.data === 'object' && !config.data.org_slug) {
       config.data = { ...config.data, org_slug: org };
     }
   }
@@ -61,6 +102,10 @@ export const authApi = {
   me: () => api.get('/auth/me'),
   forgotPassword: (data) => api.post('/auth/forgot-password', data),
   resetPassword: (data) => api.post('/auth/reset-password', data),
+  // Signed-in change; also the way out of the forced change a bulk-imported
+  // employee faces on first login. Returns a NEW token — the old one is revoked
+  // by the password change itself.
+  changePassword: (data) => api.post('/auth/change-password', data),
 };
 
 // ── Ideas ─────────────────────────────────────────────────────────
@@ -110,13 +155,41 @@ export const usersApi = {
   analytics: () => api.get('/reports/analytics'),
   audit: () => api.get('/reports/audit'),
   hierarchy: () => api.get('/users/hierarchy'),
+  // Paginated + server-side search: a tenant can now hold 10,000 employees, so
+  // the console can no longer pull the whole table down at once.
   adminList: (params) => api.get('/users/admin', { params }),
   managers: () => api.get('/users/managers'),
   createUser: (data) => api.post('/users', data),
   updateUser: (data) => api.put(`/users/${data.id}`, data),
   deleteUser: (id) => api.delete(`/users/${id}`),
   profile: () => api.get('/users/profile'),
-  resetPasswordAdmin: (data) => api.post('/users/reset-password', data),
+};
+
+// ── Bulk employee import (org admin) ──────────────────────────────────
+export const userImportApi = {
+  downloadTemplate: async () => {
+    const res = await api.get('/users/import/template', { responseType: 'blob' });
+    saveBlob(res.data, 'ifqm-employee-import-template.xlsx');
+  },
+  // Dry run: validates and reports, writes nothing.
+  // NOTE: no explicit Content-Type — the browser must set it so the multipart
+  // boundary is included (see the request interceptor).
+  preview: (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post('/users/import/preview', fd);
+  },
+  // Real run. Returns 202 + a job id; the accounts are created in the background.
+  start: (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post('/users/import', fd);
+  },
+  job: (id) => api.get(`/users/import/${id}`),
+  downloadErrors: async (id) => {
+    const res = await api.get(`/users/import/${id}/errors.csv`, { responseType: 'blob' });
+    saveBlob(res.data, `import-${id}-errors.csv`);
+  },
 };
 
 // ── AI Score ──────────────────────────────────────────────────────
@@ -172,7 +245,9 @@ export function saveBlob(blob, filename) {
 
 // ── Upload ────────────────────────────────────────────────────────
 export const uploadApi = {
-  upload: (formData) => api.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  // Same fix as the import: no hand-written Content-Type, or the multipart
+  // boundary is lost and the server sees a file-less request.
+  upload: (formData) => api.post('/upload', formData),
   delete: (id) => api.delete(`/upload/${id}`),
 
   // Attachments are no longer public files on disk — they are fetched through

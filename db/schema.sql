@@ -22,9 +22,52 @@ CREATE TABLE IF NOT EXISTS users (
   -- actually terminates sessions opened with the old password.
   password_changed_at DATETIME NULL DEFAULT NULL,
   deactivated_at  DATETIME NULL DEFAULT NULL,
+  -- Bulk-imported employees start with a derived temporary password and must
+  -- replace it before they can use anything (enforced in the auth middleware).
+  must_change_password TINYINT(1) NOT NULL DEFAULT 0,
+  date_of_birth   DATE NULL DEFAULT NULL,
+  activated_at    DATETIME NULL DEFAULT NULL,
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL,
-  INDEX idx_users_email_status (email, status)
+  INDEX idx_users_email_status (email, status),
+  INDEX idx_users_name (name),
+  INDEX idx_users_manager (manager_id)
+);
+
+-- ── Bulk employee import ────────────────────────────────────────────────────
+-- A 10,000-row import cannot run inside an HTTP request, so it runs as a
+-- background job and the UI polls it. The job row doubles as the audit record
+-- of a privileged action (who mass-created accounts, when, and how many).
+CREATE TABLE IF NOT EXISTS user_import_jobs (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  actor_id        INT NULL,
+  actor_name      VARCHAR(100) NULL,
+  filename        VARCHAR(255) NULL,
+  status          ENUM('pending','running','completed','failed') NOT NULL DEFAULT 'pending',
+  phase           VARCHAR(24) NULL,
+  total_rows      INT NOT NULL DEFAULT 0,
+  processed_rows  INT NOT NULL DEFAULT 0,
+  created_count   INT NOT NULL DEFAULT 0,
+  skipped_count   INT NOT NULL DEFAULT 0,
+  error_message   TEXT NULL,
+  started_at      DATETIME NULL,
+  finished_at     DATETIME NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_import_status (status),
+  INDEX idx_import_created (created_at)
+);
+
+CREATE TABLE IF NOT EXISTS user_import_errors (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  job_id       INT NOT NULL,
+  row_number   INT NOT NULL,
+  employee_id  VARCHAR(191) NULL,
+  email        VARCHAR(191) NULL,
+  message      VARCHAR(255) NOT NULL,
+  FOREIGN KEY (job_id) REFERENCES user_import_jobs(id) ON DELETE CASCADE,
+  INDEX idx_import_err_job (job_id)
 );
 
 CREATE TABLE IF NOT EXISTS ideas (

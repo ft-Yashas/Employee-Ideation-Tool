@@ -4,10 +4,47 @@
  * Role guards mirror the PHP requireRole(...) calls exactly.
  */
 import { Router } from 'express';
+import multer from 'multer';
 import * as users from '../controllers/userController.js';
+import * as userImport from '../controllers/userImportController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { heavyLimiter } from '../middleware/rateLimiter.js';
+import { badRequest } from '../utils/respond.js';
 
 const router = Router();
+
+// Spreadsheets are small even at 20k rows (a few MB). The cap is deliberately
+// tight: exceljs decompresses the upload, so an unbounded file is a memory DoS.
+const IMPORT_MAX_BYTES = 15 * 1024 * 1024;
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: IMPORT_MAX_BYTES, files: 1 },
+});
+
+function handleImportFile(req, res, next) {
+  importUpload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return next(badRequest(`File is too large (max ${IMPORT_MAX_BYTES / 1024 / 1024} MB).`));
+      }
+      return next(err);
+    }
+    next();
+  });
+}
+
+// Only an org admin (or super admin) may create accounts in bulk — the same
+// guard single-user creation uses. The service additionally validates each row's
+// role against what this specific actor is allowed to assign.
+const ADMIN = requireRole('admin', 'super_admin');
+
+// ── Bulk import ── declared before the /:id routes so "import" is never
+// mistaken for a user id.
+router.get('/import/template', ADMIN, userImport.template);
+router.post('/import/preview', ADMIN, handleImportFile, userImport.preview);
+router.post('/import', ADMIN, heavyLimiter, handleImportFile, userImport.start);
+router.get('/import/:id', ADMIN, userImport.job);
+router.get('/import/:id/errors.csv', ADMIN, userImport.errorsCsv);
 
 // Literal paths first, before the /:id param routes.
 router.get('/', requireAuth, users.list);                       // action=list

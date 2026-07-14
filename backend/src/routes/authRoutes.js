@@ -4,7 +4,7 @@
  */
 import { Router } from 'express';
 import * as auth from '../controllers/authController.js';
-import { optionalAuth } from '../middleware/auth.js';
+import { optionalAuth, requireAuth } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
@@ -15,5 +15,9 @@ router.post('/logout', auth.logout);
 router.post('/forgot-password', authLimiter, auth.forgotPassword);
 router.post('/reset-password', authLimiter, auth.resetPassword);
 router.get('/check-reset-token', auth.checkResetToken);
+
+// Signed-in change. Reachable even while must_change_password is set — it is on
+// the allowlist in the auth middleware, and is the only way out of that state.
+router.post('/change-password', requireAuth, auth.changePassword);
 
 export default router;

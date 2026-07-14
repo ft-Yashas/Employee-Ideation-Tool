@@ -36,7 +36,11 @@ export default function LoginPage() {
         else if (role === 'super_admin') navigate('/super-admin');
         else navigate('/dashboard');
       } else {
-        setError(result.error || t('login.failed'));
+        // result.error carries the server's own message — "3 attempt(s)
+        // remaining", "Too many failed attempts…", "Unknown organization code."
+        // Only fall back to a generic message when there genuinely wasn't one
+        // (i.e. the request never reached the server).
+        setError(result.error || t('msg.server_error'));
       }
     } catch(err) {
       setError(t('msg.server_error'));
