@@ -5,10 +5,11 @@ import { usersApi } from '../services/api';
 import { isPrivileged, translateStatus, translateArea } from '../utils/helpers';
 
 const STATUS_COLORS = {
-  'Submitted':'#374151','Under Review':'#f59e0b','Approved':'#10b981',
-  'Rejected':'#ef4444','Implemented':'#4b5563','Draft':'#94a3b8',
+  'Submitted':'#2563eb','Under Review':'#d97706','Approved':'#16a34a',
+  'Rejected':'#dc2626','Implemented':'#4f46e5','Draft':'#94a3b8',
 };
-const IMP_COLORS = ['#374151','#4b5563','#4b5563','#9ca3af','#9ca3af','#d1d5db'];
+// A categorical ramp in the brand hue — not a grey gradient.
+const IMP_COLORS = ['#4f46e5','#6366f1','#0ea5e9','#14b8a6','#f59e0b','#f43f5e','#8b5cf6'];
 
 export default function AnalyticsPage() {
   const { user }   = useAuth();
@@ -84,8 +85,8 @@ export default function AnalyticsPage() {
     <>
       {/* KPI Grid */}
       <div className="kpi-grid" id="analytics-kpis">
-        <div className="kpi-card" style={{ borderLeftColor:'#1f2937' }}>
-          <div className="kpi-icon" style={{ background:'#c8ccd1',color:'#374151' }}>
+        <div className="kpi-card">
+          <div className="kpi-icon" style={{ background:'var(--primary-light)',color:'var(--primary)' }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
               <path d="M9 21h6M12 3a6 6 0 016 6c0 2.2-1.1 3.8-2.5 5L15 16H9l-.5-2C7 12.8 6 11.2 6 9a6 6 0 016-6z"/>
             </svg>
@@ -95,8 +96,8 @@ export default function AnalyticsPage() {
             <div className="kpi-label">{t('dash.total')}</div>
           </div>
         </div>
-        <div className="kpi-card" style={{ borderLeftColor:'#10b981' }}>
-          <div className="kpi-icon" style={{ background:'#bbf7d0',color:'#10b981' }}>
+        <div className="kpi-card">
+          <div className="kpi-icon" style={{ background:'var(--success-light)',color:'var(--success)' }}>
             <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div className="kpi-body">
@@ -104,8 +105,8 @@ export default function AnalyticsPage() {
             <div className="kpi-label">{t('analytics.approval_rate')}</div>
           </div>
         </div>
-        <div className="kpi-card" style={{ borderLeftColor:'#374151' }}>
-          <div className="kpi-icon" style={{ background:'#c8ccd1',color:'#4b5563' }}>
+        <div className="kpi-card">
+          <div className="kpi-icon" style={{ background:'var(--surface-2)',color:'var(--text-muted)' }}>
             <svg viewBox="0 0 24 24">
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
             </svg>
@@ -115,8 +116,8 @@ export default function AnalyticsPage() {
             <div className="kpi-label">{t('analytics.impl_rate')}</div>
           </div>
         </div>
-        <div className="kpi-card" style={{ borderLeftColor:'#1f2937' }}>
-          <div className="kpi-icon" style={{ background:'#c8ccd1',color:'#374151' }}>
+        <div className="kpi-card">
+          <div className="kpi-icon" style={{ background:'var(--primary-light)',color:'var(--primary)' }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
               <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
             </svg>

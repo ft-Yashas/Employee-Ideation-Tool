@@ -161,6 +161,8 @@ export const usersApi = {
   managers: () => api.get('/users/managers'),
   createUser: (data) => api.post('/users', data),
   updateUser: (data) => api.put(`/users/${data.id}`, data),
+  // Hierarchy screen: change only who a user reports to (escalation chain edge).
+  updateManager: (id, managerId) => api.put(`/users/${id}/manager`, { manager_id: managerId }),
   deleteUser: (id) => api.delete(`/users/${id}`),
   profile: () => api.get('/users/profile'),
 };

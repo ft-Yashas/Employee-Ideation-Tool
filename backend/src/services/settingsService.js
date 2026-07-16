@@ -21,6 +21,13 @@ const isAdmin = (role) => role === 'admin' || role === 'super_admin';
 const DEFAULT_REVIEWER_ROLES = ['team_lead', 'project_lead', 'manager', 'senior_manager'];
 const DEFAULT_FINAL_ROLES = ['executive', 'admin', 'super_admin'];
 
+// Roles a tenant admin may place in their approval chain. Anything else typed
+// into the role lists is dropped on save — a bad role name would silently
+// exclude reviewers from the escalation walk.
+const VALID_CHAIN_ROLES = [
+  'team_lead', 'project_lead', 'manager', 'senior_manager', 'executive', 'admin', 'super_admin',
+];
+
 export async function getApprovalConfig(db) {
   const settings = await getOrgSettings(db);
   const mode = settings.approval_mode ?? 'default';
@@ -82,7 +89,8 @@ export async function updateSettings(db, body) {
       value = String(Math.max(1, Math.min(100, parseInt(value, 10) || 0)));
     }
     if (key === 'approval_reviewer_roles' || key === 'approval_final_approver_roles') {
-      value = String(value).split(',').map((s) => s.trim()).filter(Boolean).join(',');
+      value = String(value).split(',').map((s) => s.trim())
+        .filter((r) => VALID_CHAIN_ROLES.includes(r)).join(',');
     }
 
     await db.execute(

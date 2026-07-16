@@ -16,13 +16,17 @@ import BulkImportModal from '../components/BulkImportModal';
  * the org admin themselves matches `admin`).
  */
 const ROLE_BADGE_STYLE = {
-  admin:     { background:'#c8ccd1', color:'#374151', border:'1px solid #6b7280' },
-  executive: { background:'#c8ccd1', color:'#4b5563', border:'1px solid #9ca3af' },
-  manager:   { background:'#fef3c7', color:'#92400e', border:'1px solid #fde68a' },
-  employee:  { background:'#a7f3d0', color:'#065f46', border:'1px solid #a7f3d0' },
+  admin:          { background:'var(--primary-light)', color:'var(--primary)', border:'1px solid var(--primary-dim)' },
+  executive:      { background:'var(--info-light)',    color:'var(--info)',    border:'1px solid var(--info-dim)' },
+  senior_manager: { background:'var(--info-light)',    color:'var(--info)',    border:'1px solid var(--info-dim)' },
+  manager:        { background:'var(--warning-light)', color:'var(--warning)', border:'1px solid var(--warning-dim)' },
+  project_lead:   { background:'var(--warning-light)', color:'var(--warning)', border:'1px solid var(--warning-dim)' },
+  team_lead:      { background:'var(--warning-light)', color:'var(--warning)', border:'1px solid var(--warning-dim)' },
+  employee:       { background:'var(--success-light)', color:'var(--success)', border:'1px solid var(--success-dim)' },
+  trainee:        { background:'var(--success-light)', color:'var(--success)', border:'1px solid var(--success-dim)' },
 };
 
-const TAB_KEYS = ['admin.tab_overview','admin.tab_ideas','admin.tab_users','admin.tab_system'];
+const TAB_KEYS = ['admin.tab_overview','admin.tab_ideas','admin.tab_users','admin.tab_hierarchy','admin.tab_system'];
 
 export default function AdminPage() {
   const { user }      = useAuth();
@@ -51,7 +55,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (tab === 0) loadDash();
     if (tab === 1) loadIdeas();
-    if (tab === 3) loadSettings();
+    if (tab === 4) loadSettings();
   }, [tab]);
 
   // The user list is searched and paged on the SERVER — a tenant can hold
@@ -123,10 +127,12 @@ export default function AdminPage() {
     e.preventDefault();
     const fd = new FormData(e.target);
     const data = {};
-    ['review_sla_days','escalation_days','smtp_host','smtp_port','smtp_user','smtp_pass','smtp_from','smtp_from_name','approval_threshold'].forEach(k => { data[k] = fd.get(k)||''; });
-    data['approval_mode'] = fd.get('approval_mode') || 'default';
+    // The approval_* keys are deliberately NOT collected here any more — they
+    // are managed on the Hierarchy tab. Collecting them from a form that has
+    // no such fields sent '' / 'default' and silently wiped a tenant's custom
+    // approval chain every time SMTP or a flag was saved.
+    ['review_sla_days','escalation_days','smtp_host','smtp_port','smtp_user','smtp_pass','smtp_from','smtp_from_name'].forEach(k => { data[k] = fd.get(k)||''; });
     ['anonymous_allowed','public_board_enabled','challenges_enabled','email_enabled'].forEach(k => { data[k] = fd.get(k)==='1'?'1':'0'; });
-    ['approval_reviewer_roles','approval_final_approver_roles'].forEach(key => { data[key] = [...fd.getAll(key)].join(','); });
     setSettingsMsg('');
     try {
       const res = await settingsApi.update(data);
@@ -261,9 +267,9 @@ export default function AdminPage() {
                       <td><strong>{u.points}</strong></td>
                       <td>
                         <span style={{ fontSize:10,padding:'1px 8px',borderRadius:99,border:'1px solid',
-                          background:u.status==='inactive'?'#fee2e2':'#bbf7d0',
-                          color:u.status==='inactive'?'#ef4444':'#166534',
-                          borderColor:u.status==='inactive'?'#fca5a5':'#bbf7d0' }}>
+                          background:u.status==='inactive'?'var(--danger-light)':'var(--success-light)',
+                          color:u.status==='inactive'?'var(--danger)':'var(--success)',
+                          borderColor:u.status==='inactive'?'var(--danger-dim)':'var(--success-dim)' }}>
                           {t(u.status==='inactive' ? 'admin.inactive' : 'admin.active')}
                         </span>
                         {/* Imported and never signed in: their password is still
@@ -271,7 +277,7 @@ export default function AdminPage() {
                         {!!u.must_change_password && (
                           <div style={{ marginTop:3 }}>
                             <span title={t('imp.pending_hint')} style={{ fontSize:10,padding:'1px 8px',borderRadius:99,
-                              background:'#fef3c7',color:'#92400e',border:'1px solid #fde68a' }}>
+                              background:'var(--warning-light)',color:'var(--warning)',border:'1px solid var(--warning-dim)' }}>
                               {t('imp.pending')}
                             </span>
                           </div>
@@ -283,7 +289,7 @@ export default function AdminPage() {
                           : (
                             <div style={{ display:'flex',gap:6 }}>
                               <button className="btn btn-outline btn-sm" onClick={() => { setEditUser(u); setShowUserForm(true); }}>{t('btn.edit')}</button>
-                              <button className="btn btn-sm" style={{ background:'#fee2e2',color:'#ef4444',border:'1px solid #fca5a5' }}
+                              <button className="btn btn-sm" style={{ background:'var(--danger-light)',color:'var(--danger)',border:'1px solid var(--danger-dim)' }}
                                 onClick={() => handleDeleteUser(u.id, u.name)}>{t('btn.remove')}</button>
                             </div>
                           )
@@ -319,8 +325,11 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* Hierarchy — approval workflow + reporting structure */}
+      {tab === 3 && <HierarchyTab t={t} showToast={showToast} currentUserId={user?.id} />}
+
       {/* System */}
-      {tab === 3 && settings && (
+      {tab === 4 && settings && (
         <div style={{ maxWidth:600,marginTop:16 }}>
           <form onSubmit={handleSaveSettings}>
             <div style={{ fontSize:13,fontWeight:600,color:'var(--heading)',marginBottom:16 }}>{t('admin.sla_heading')}</div>
@@ -405,6 +414,290 @@ export default function AdminPage() {
         />
       )}
     </>
+  );
+}
+
+/*
+ * ── Hierarchy tab ──────────────────────────────────────────────────
+ * The tenant admin's control panel for the hierarchical idea-submission
+ * system. Two independently owned pieces:
+ *
+ *  1. Approval Workflow — which roles review (escalation chain), which roles
+ *     give the final decision, and the committee threshold. Stored in the
+ *     tenant's own org_settings, so every organisation configures its own
+ *     chain without touching anyone else's. (This editor existed in the PHP
+ *     Admin panel and was lost in the React migration.)
+ *
+ *  2. Reporting Structure — the manager tree ideas escalate through.
+ *     Every card carries a "Reports to" selector that rewires that single
+ *     edge; the server refuses assignments that would close a loop.
+ */
+
+// Seniority ladder, junior → senior. Escalation walks manager_id upward, so
+// this order is only used for the preview text and checkbox layout.
+const CHAIN_LADDER = ['team_lead','project_lead','manager','senior_manager','executive','admin','super_admin'];
+// PHP offered 4 reviewer / 3 final roles; the pool is widened so an org can
+// also make executives part of the chain or let senior managers close ideas.
+const REVIEWER_ROLE_OPTIONS = ['team_lead','project_lead','manager','senior_manager','executive'];
+const FINAL_ROLE_OPTIONS    = ['manager','senior_manager','executive','admin','super_admin'];
+const DEFAULT_REVIEWERS = ['team_lead','project_lead','manager','senior_manager'];
+const DEFAULT_FINALS    = ['executive','admin','super_admin'];
+
+const HIER_ROLE_COLORS = {
+  admin:'#374151', executive:'#4b5563', senior_manager:'#6b7280',
+  manager:'#f59e0b', project_lead:'#0891b2', team_lead:'#0284c7',
+  employee:'#10b981', trainee:'#64748b',
+};
+
+function HierarchyTab({ t, showToast, currentUserId }) {
+  const [users,     setUsers]     = useState([]);
+  const [truncated, setTruncated] = useState(false);
+  const [limit,     setLimit]     = useState(0);
+  const [total,     setTotal]     = useState(0);
+  const [managers,  setManagers]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState('');
+  const [savingId,  setSavingId]  = useState(null);
+
+  // Approval workflow state
+  const [mode,      setMode]      = useState('default');
+  const [revRoles,  setRevRoles]  = useState(DEFAULT_REVIEWERS);
+  const [finRoles,  setFinRoles]  = useState(DEFAULT_FINALS);
+  const [threshold, setThreshold] = useState(100);
+  const [wfSaving,  setWfSaving]  = useState(false);
+  const [wfMsg,     setWfMsg]     = useState(null); // { ok, text }
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    setLoading(true);
+    setError('');
+    try {
+      const [hierRes, mgrRes, setRes] = await Promise.all([
+        usersApi.hierarchy(),
+        usersApi.managers(),
+        settingsApi.get(),
+      ]);
+      if (hierRes.data.success) {
+        setUsers(hierRes.data.users || []);
+        setTruncated(!!hierRes.data.truncated);
+        setLimit(hierRes.data.limit || 0);
+        setTotal(hierRes.data.stats?.total ?? 0);
+      }
+      setManagers(mgrRes.data.managers || []);
+      const s = setRes.data.settings || {};
+      setMode(s.approval_mode === 'custom' ? 'custom' : 'default');
+      const parse = (v, fb) => {
+        const list = String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+        return list.length ? list : fb;
+      };
+      setRevRoles(parse(s.approval_reviewer_roles, DEFAULT_REVIEWERS));
+      setFinRoles(parse(s.approval_final_approver_roles, DEFAULT_FINALS));
+      setThreshold(Math.max(1, Math.min(100, parseInt(s.approval_threshold, 10) || 100)));
+    } catch { setError(t('msg.fail_load')); }
+    setLoading(false);
+  }
+
+  function toggleRole(list, setList, role) {
+    setList(list.includes(role) ? list.filter(r => r !== role) : [...list, role]);
+  }
+
+  async function saveWorkflow() {
+    if (mode === 'custom' && (!revRoles.length || !finRoles.length)) {
+      setWfMsg({ ok:false, text: t('hier.roles_required') });
+      return;
+    }
+    setWfSaving(true);
+    setWfMsg(null);
+    try {
+      const res = await settingsApi.update({
+        approval_mode: mode,
+        approval_reviewer_roles: revRoles.join(','),
+        approval_final_approver_roles: finRoles.join(','),
+        approval_threshold: String(threshold),
+      });
+      if (res.data.success) { setWfMsg({ ok:true, text: t('hier.saved') }); showToast(t('hier.saved'),'success'); }
+      else setWfMsg({ ok:false, text: res.data.error || t('admin.settings_failed') });
+    } catch { setWfMsg({ ok:false, text: t('msg.server_error') }); }
+    setWfSaving(false);
+  }
+
+  function resetWorkflow() {
+    if (!confirm(t('hier.confirm_reset'))) return;
+    setMode('default');
+    setRevRoles(DEFAULT_REVIEWERS);
+    setFinRoles(DEFAULT_FINALS);
+    setThreshold(100);
+    setWfMsg(null);
+  }
+
+  async function reassign(userId, managerId) {
+    setSavingId(userId);
+    try {
+      const res = await usersApi.updateManager(userId, managerId || null);
+      if (res.data.success) {
+        showToast(t('hier.updated'), 'success');
+        // Rewire locally so the tree redraws without a full reload.
+        setUsers(us => us.map(u => u.id === userId
+          ? { ...u, manager_id: managerId || null,
+              manager_name: managers.find(m => m.id === Number(managerId))?.name || null }
+          : u));
+      } else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch (e) {
+      showToast(e.response?.data?.error || t('msg.server_error'), 'danger');
+    }
+    setSavingId(null);
+  }
+
+  if (loading) return <div className="empty-state"><div className="spinner"></div></div>;
+  if (error)   return <div className="alert alert-danger" style={{ marginTop:16 }}>{error}</div>;
+
+  // Chain preview: junior → senior among the selected reviewer roles.
+  const orderedRev = CHAIN_LADDER.filter(r => revRoles.includes(r));
+  const chainPreview = mode === 'custom'
+    ? [t('role.employee'), ...orderedRev.map(r => formatRole(r, t))].join(' → ')
+      + ` → ${t('hier.final_short')}: ` + finRoles.map(r => formatRole(r, t)).join(' / ')
+    : `${t('role.employee')} → ${DEFAULT_REVIEWERS.map(r => formatRole(r, t)).join(' → ')} → ${t('hier.final_short')}: ${DEFAULT_FINALS.map(r => formatRole(r, t)).join(' / ')}`;
+
+  // Build the reporting tree.
+  const byId = {};
+  users.forEach(u => { byId[u.id] = { ...u, children: [] }; });
+  const roots = [];
+  users.forEach(u => {
+    if (u.manager_id && byId[u.manager_id]) byId[u.manager_id].children.push(byId[u.id]);
+    else roots.push(byId[u.id]);
+  });
+  const rootOrder = Object.fromEntries([...CHAIN_LADDER].reverse().map((r, i) => [r, i]));
+  roots.sort((a,b) => (rootOrder[a.role]??9)-(rootOrder[b.role]??9) || a.name.localeCompare(b.name));
+
+  const roleChip = (r, selected, onClick) => (
+    <label key={r} style={{ display:'flex',alignItems:'center',gap:4,cursor:'pointer',fontSize:12,
+      background:'var(--surface)',padding:'4px 10px',borderRadius:4,border:'1px solid var(--border)' }}>
+      <input type="checkbox" checked={selected} onChange={onClick} style={{ accentColor:'var(--primary)' }} />
+      {formatRole(r, t)}
+    </label>
+  );
+
+  return (
+    <div style={{ marginTop:16 }}>
+      {/* ── Approval Workflow ── */}
+      <div className="card" style={{ marginBottom:20 }}>
+        <div className="card-title">{t('hier.approval_title')}</div>
+        <div style={{ fontSize:12,color:'var(--subtle)',marginBottom:14 }}>{t('hier.approval_sub')}</div>
+
+        <div className="form-group" style={{ marginBottom:14 }}>
+          <label style={{ fontWeight:500,marginBottom:8,display:'block' }}>{t('hier.mode_label')}</label>
+          <div style={{ display:'flex',gap:20,flexWrap:'wrap' }}>
+            <label style={{ display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13 }}>
+              <input type="radio" name="approval_mode" value="default" checked={mode==='default'} onChange={() => setMode('default')} />
+              {t('hier.mode_default')}
+            </label>
+            <label style={{ display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13 }}>
+              <input type="radio" name="approval_mode" value="custom" checked={mode==='custom'} onChange={() => setMode('custom')} />
+              {t('hier.mode_custom')}
+            </label>
+          </div>
+          <div style={{ fontSize:11,color:'var(--subtle)',marginTop:4 }}>{t('hier.default_hint')}</div>
+        </div>
+
+        {mode === 'custom' && (
+          <div style={{ borderLeft:'2px solid var(--primary)',paddingLeft:14,marginBottom:14 }}>
+            <div className="form-group" style={{ marginBottom:12 }}>
+              <label style={{ fontWeight:500,marginBottom:6,display:'block' }}>{t('hier.reviewer_roles')}</label>
+              <div style={{ display:'flex',flexWrap:'wrap',gap:6 }}>
+                {REVIEWER_ROLE_OPTIONS.map(r => roleChip(r, revRoles.includes(r), () => toggleRole(revRoles, setRevRoles, r)))}
+              </div>
+              <div style={{ fontSize:11,color:'var(--subtle)',marginTop:4 }}>{t('hier.reviewer_hint')}</div>
+            </div>
+            <div className="form-group" style={{ marginBottom:12 }}>
+              <label style={{ fontWeight:500,marginBottom:6,display:'block' }}>{t('hier.final_roles')}</label>
+              <div style={{ display:'flex',flexWrap:'wrap',gap:6 }}>
+                {FINAL_ROLE_OPTIONS.map(r => roleChip(r, finRoles.includes(r), () => toggleRole(finRoles, setFinRoles, r)))}
+              </div>
+              <div style={{ fontSize:11,color:'var(--subtle)',marginTop:4 }}>{t('hier.final_hint')}</div>
+            </div>
+            <div className="form-group" style={{ marginBottom:8,maxWidth:220 }}>
+              <label style={{ fontWeight:500,marginBottom:6,display:'block' }}>{t('hier.threshold')}</label>
+              <input className="form-control" type="number" min="1" max="100" value={threshold}
+                onChange={e => setThreshold(e.target.value)}
+                onBlur={() => setThreshold(v => Math.max(1, Math.min(100, parseInt(v, 10) || 100)))} />
+              <div style={{ fontSize:11,color:'var(--subtle)',marginTop:4 }}>{t('hier.threshold_hint')}</div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ fontSize:12,background:'var(--bg)',border:'1px dashed var(--border)',borderRadius:'var(--r)',padding:'8px 12px',marginBottom:14 }}>
+          <strong style={{ fontSize:11,textTransform:'uppercase',letterSpacing:.5,color:'var(--subtle)' }}>{t('hier.chain_preview')}</strong>
+          <div style={{ marginTop:4,color:'var(--text)' }}>{chainPreview}</div>
+        </div>
+
+        <div style={{ display:'flex',gap:8,alignItems:'center',flexWrap:'wrap' }}>
+          <button className="btn btn-primary btn-sm" disabled={wfSaving} onClick={saveWorkflow}>
+            {wfSaving ? t('btn.saving') : t('hier.save_workflow')}
+          </button>
+          <button className="btn btn-outline btn-sm" onClick={resetWorkflow}>{t('hier.reset_defaults')}</button>
+          {wfMsg && <span style={{ fontSize:13,color:wfMsg.ok?'var(--success)':'var(--danger)' }}>{wfMsg.text}</span>}
+        </div>
+      </div>
+
+      {/* ── Reporting Structure ── */}
+      <div className="card">
+        <div className="card-title">{t('hier.org_structure')}</div>
+        <div style={{ fontSize:12,color:'var(--subtle)',marginBottom:14 }}>{t('hier.org_hint')}</div>
+        {truncated && (
+          <div className="alert alert-warning" style={{ marginBottom:12,fontSize:12 }}>
+            {t('sa.too_many_tree', { shown: limit, total })}
+          </div>
+        )}
+        {!roots.length
+          ? <div className="empty-state">{t('sa.no_users')}</div>
+          : roots.map(n => (
+            <ReportingNode key={n.id} node={n} depth={0} t={t}
+              managers={managers} savingId={savingId} currentUserId={currentUserId} onReassign={reassign} />
+          ))
+        }
+      </div>
+    </div>
+  );
+}
+
+function ReportingNode({ node, depth, t, managers, savingId, currentUserId, onReassign }) {
+  const color = HIER_ROLE_COLORS[node.role] || '#888';
+  const sorted = [...(node.children || [])].sort((a, b) => {
+    const o = Object.fromEntries([...CHAIN_LADDER].reverse().map((r, i) => [r, i]));
+    return (o[a.role]??9) - (o[b.role]??9) || a.name.localeCompare(b.name);
+  });
+  // The admin's own row and other admins keep their selector too — only the
+  // node itself is excluded from its manager options (self-reporting).
+  const options = managers.filter(m => m.id !== node.id);
+  return (
+    <div style={{ position:'relative',marginLeft:depth*36,marginBottom:8 }}>
+      {depth > 0 && <div style={{ position:'absolute',left:-18,top:'50%',width:14,height:1,background:'var(--border)' }}></div>}
+      <div style={{ borderLeft:`3px solid ${color}`,padding:'10px 14px',background:'var(--surface)',borderRadius:'var(--r)',boxShadow:'var(--shadow-sm)',display:'flex',alignItems:'center',gap:12,flexWrap:'wrap' }}>
+        <div className="avatar" style={{ background:`linear-gradient(135deg,${color},${color}cc)`,flexShrink:0,fontWeight:800 }}>
+          {node.avatar_initials || node.name?.[0] || '?'}
+        </div>
+        <div style={{ flex:1,minWidth:160 }}>
+          <div style={{ fontWeight:700,fontSize:13,color:'var(--text)' }}>{node.name}</div>
+          <div style={{ fontSize:11,color:'var(--subtle)',marginTop:2 }}>{node.employee_id} · {node.department||'–'}</div>
+        </div>
+        <span className="badge" style={{ background:`${color}18`,color,border:`1px solid ${color}40`,fontWeight:700 }}>{formatRole(node.role, t)}</span>
+        <div style={{ display:'flex',alignItems:'center',gap:6 }}>
+          <span style={{ fontSize:11,color:'var(--subtle)' }}>{t('hier.reports_to')}</span>
+          <select className="form-control" style={{ width:190,fontSize:12,padding:'4px 8px' }}
+            value={node.manager_id || ''}
+            disabled={savingId === node.id}
+            onChange={e => onReassign(node.id, e.target.value ? Number(e.target.value) : null)}>
+            <option value="">{t('admin.uf_none')}</option>
+            {options.map(m => <option key={m.id} value={m.id}>{m.name} ({formatRole(m.role, t)})</option>)}
+          </select>
+        </div>
+      </div>
+      {sorted.map(c => (
+        <ReportingNode key={c.id} node={c} depth={depth+1} t={t}
+          managers={managers} savingId={savingId} currentUserId={currentUserId} onReassign={onReassign} />
+      ))}
+    </div>
   );
 }
 

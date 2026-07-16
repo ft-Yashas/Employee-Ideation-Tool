@@ -26,6 +26,10 @@ export const updateUser = asyncHandler(async (req, res) =>
   respond(res, await userService.updateUser(req.db, req.user, req.params.id ?? req.body?.id, req.body || {}))
 );
 
+export const updateManager = asyncHandler(async (req, res) =>
+  respond(res, await userService.updateManager(req.db, req.user, req.params.id, req.body || {}))
+);
+
 export const deleteUser = asyncHandler(async (req, res) =>
   respond(res, await userService.deleteUser(req.db, req.user, req.params.id ?? req.body?.id))
 );
@@ -42,4 +46,4 @@ export const updateProfile = asyncHandler(async (req, res) =>
   respond(res, await userService.updateProfile(req.db, req.user, req.body || {}))
 );
 
-export default { list, adminUsers, createUser, updateUser, deleteUser, managers, hierarchy, updateProfile };
+export default { list, adminUsers, createUser, updateUser, updateManager, deleteUser, managers, hierarchy, updateProfile };

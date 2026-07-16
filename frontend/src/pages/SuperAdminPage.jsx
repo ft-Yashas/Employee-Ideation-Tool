@@ -105,15 +105,15 @@ export default function SuperAdminPage() {
   });
 
   const kpiStrip = [
-    [t('dash.total'),       dash?.total||0,          '#374151', t('sa.sub_excl_drafts')],
-    [t('status.review'),    pending,                 '#ef4444', t('sa.sub_pending')],
-    [t('dash.approved'),    counts['Approved']||0,   '#f59e0b', t('sa.sub_awaiting')],
-    [t('dash.implemented'), counts['Implemented']||0,'#10b981', t('sa.sub_completed')],
-    [t('pa.total_users'),   s.total||0,              '#4b5563', t('sa.sub_breakdown', { a: s.admins||0, m: s.managers||0, e: s.employees||0 })],
-    [t('sa.executives'),    s.executives||0,         '#2563eb', t('sa.sub_exec_accounts')],
+    [t('dash.total'),       dash?.total||0,          'var(--heading)', t('sa.sub_excl_drafts')],
+    [t('status.review'),    pending,                 'var(--warning)', t('sa.sub_pending')],
+    [t('dash.approved'),    counts['Approved']||0,   'var(--success)', t('sa.sub_awaiting')],
+    [t('dash.implemented'), counts['Implemented']||0,'var(--primary)', t('sa.sub_completed')],
+    [t('pa.total_users'),   s.total||0,              'var(--heading)', t('sa.sub_breakdown', { a: s.admins||0, m: s.managers||0, e: s.employees||0 })],
+    [t('sa.executives'),    s.executives||0,         'var(--info)',    t('sa.sub_exec_accounts')],
   ];
 
-  const statusColors = { 'Submitted':'#2563eb','Under Review':'#f59e0b','Approved':'#10b981','Rejected':'#ef4444','Implemented':'#4b5563' };
+  const statusColors = { 'Submitted':'#2563eb','Under Review':'#d97706','Approved':'#16a34a','Rejected':'#dc2626','Implemented':'#4f46e5' };
 
   return (
     <>
@@ -125,7 +125,7 @@ export default function SuperAdminPage() {
       {/* KPI Strip */}
       <div className="kpi-grid" id="sa-kpi-strip">
         {kpiStrip.map(([label, val, color, sub]) => (
-          <div key={label} className="kpi-card" style={{ borderLeftColor:color }}>
+          <div key={label} className="kpi-card">
             <div className="kpi-val" style={{ color }}>{val}</div>
             <div className="kpi-label">{label}</div>
             <div style={{ fontSize:10,color:'var(--subtle)',marginTop:3 }}>{sub}</div>

@@ -50,10 +50,14 @@ router.get('/import/:id/errors.csv', ADMIN, userImport.errorsCsv);
 router.get('/', requireAuth, users.list);                       // action=list
 router.get('/admin', requireRole('admin', 'super_admin'), users.adminUsers);      // action=admin_users
 router.get('/managers', requireRole('admin', 'super_admin'), users.managers);     // action=managers
-router.get('/hierarchy', requireRole('super_admin'), users.hierarchy);            // action=hierarchy
+// PHP scoped hierarchy to super_admin (Command Center). The tenant admin's
+// Hierarchy screen (approval-chain + reporting-line management) needs the same
+// tree, so org admins are allowed in too — it is their own org's data.
+router.get('/hierarchy', requireRole('admin', 'super_admin'), users.hierarchy);   // action=hierarchy
 router.post('/profile', requireAuth, users.updateProfile);      // action=profile
 
 router.post('/', requireRole('admin', 'super_admin'), users.createUser);          // action=create_user
+router.put('/:id/manager', requireRole('admin', 'super_admin'), users.updateManager); // hierarchy screen: reporting line only
 router.put('/:id', requireRole('admin', 'super_admin'), users.updateUser);        // action=update_user
 router.delete('/:id', requireRole('admin', 'super_admin'), users.deleteUser);     // action=delete_user
 

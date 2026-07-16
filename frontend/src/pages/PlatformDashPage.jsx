@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
 import { platformApi } from '../services/api';
 
 export default function PlatformDashPage() {
+  const { user }      = useAuth();
   const { t }         = useLang();
   const { showToast } = useToast();
   const navigate      = useNavigate();
@@ -31,10 +33,23 @@ export default function PlatformDashPage() {
 
   return (
     <>
+      {/* Console banner — restored from the PHP design */}
+      <div style={{ background:'linear-gradient(145deg,#1e1b4b 0%,#312e81 50%,#4338ca 100%)',borderRadius:'var(--r-xl, 14px)',padding:'26px 30px',marginBottom:22,display:'flex',justifyContent:'space-between',alignItems:'center',gap:16,flexWrap:'wrap',boxShadow:'var(--shadow-lg)' }}>
+        <div>
+          <div style={{ fontSize:10,textTransform:'uppercase',letterSpacing:2,color:'rgba(255,255,255,.5)',fontWeight:700,marginBottom:6 }}>IFQM · Platform Admin Console</div>
+          <div style={{ fontSize:22,fontWeight:800,color:'#fff',letterSpacing:-.5,lineHeight:1.15 }}>{t('pa.overview')}</div>
+          <div style={{ fontSize:12,color:'rgba(255,255,255,.55)',marginTop:5 }}>{t('pa.private')}</div>
+        </div>
+        <div style={{ background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.18)',borderRadius:'var(--r)',padding:'8px 18px',textAlign:'right' }}>
+          <div style={{ fontSize:10,color:'rgba(255,255,255,.5)',textTransform:'uppercase',letterSpacing:.8,marginBottom:2 }}>{t('pa.signed_in')}</div>
+          <div style={{ fontSize:13,fontWeight:700,color:'#fff' }} id="pa-name">{user?.name || '—'}</div>
+        </div>
+      </div>
+
       {/* KPI Strip */}
       <div className="kpi-grid" id="pa-kpi-strip">
         <div className="kpi-card" style={{ borderLeftColor:'#1f2937' }}>
-          <div className="kpi-icon" style={{ background:'#c8ccd1',color:'#374151' }}>
+          <div className="kpi-icon" style={{ background:'var(--primary-light)',color:'var(--primary)' }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
               <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
             </svg>
@@ -45,7 +60,7 @@ export default function PlatformDashPage() {
           </div>
         </div>
         <div className="kpi-card" style={{ borderLeftColor:'#10b981' }}>
-          <div className="kpi-icon" style={{ background:'#bbf7d0',color:'#10b981' }}>
+          <div className="kpi-icon" style={{ background:'var(--success-light)',color:'var(--success)' }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
               <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
             </svg>
@@ -56,7 +71,7 @@ export default function PlatformDashPage() {
           </div>
         </div>
         <div className="kpi-card" style={{ borderLeftColor:'#f59e0b' }}>
-          <div className="kpi-icon" style={{ background:'#fef3c7',color:'#f59e0b' }}>
+          <div className="kpi-icon" style={{ background:'var(--warning-light)',color:'var(--warning)' }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
               <path d="M9 21h6M12 3a6 6 0 016 6c0 2.2-1.1 3.8-2.5 5L15 16H9l-.5-2C7 12.8 6 11.2 6 9a6 6 0 016-6z"/>
             </svg>
@@ -68,14 +83,14 @@ export default function PlatformDashPage() {
         </div>
       </div>
 
-      <div style={{ display:'flex',justifyContent:'flex-end',margin:'20px 0 12px' }}>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>{t('pa.new_org')}</button>
-      </div>
-
       {loading && <div className="empty-state"><div className="spinner"></div></div>}
       {error   && <div className="alert alert-danger">{error}</div>}
 
-      <div className="card" id="pa-tenant-list">
+      <div className="card" id="pa-tenant-list" style={{ marginTop:20 }}>
+        <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14 }}>
+          <div className="card-title" style={{ margin:0 }}>{t('pa.all_tenants')}</div>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>{t('pa.new_org')}</button>
+        </div>
         {!loading && !error && !tenants.length && (
           <div className="empty-state">{t('pa.no_tenants')}</div>
         )}

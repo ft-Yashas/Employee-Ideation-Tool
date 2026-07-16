@@ -188,6 +188,51 @@ export async function updateUser(db, actor, id, body) {
   return { success: true };
 }
 
+/**
+ * PUT /users/:id/manager — reassign only who a user reports to.
+ *
+ * This exists for the admin Hierarchy screen: full updateUser() requires every
+ * profile field (and would silently reactivate an inactive account, since it
+ * defaults status to 'active'), which is the wrong tool for dragging one
+ * reporting line. The idea-escalation engine walks manager_id upward, so a
+ * reporting cycle would make an idea ping-pong between the same reviewers
+ * forever — reject any assignment that closes a loop.
+ */
+export async function updateManager(db, actor, id, body) {
+  id = parseInt(id, 10) || 0;
+  if (!id) throw badRequest('Missing user ID.');
+
+  const [tgtRows] = await db.execute('SELECT id, role FROM users WHERE id=? LIMIT 1', [id]);
+  const target = tgtRows[0];
+  if (!target) throw notFound('User not found.');
+  if (target.role === 'super_admin') throw forbidden('Cannot edit super admin.');
+
+  const managerId = body.manager_id ? parseInt(body.manager_id, 10) : null;
+
+  if (managerId) {
+    if (managerId === id) throw badRequest('A user cannot report to themselves.');
+    const [mRows] = await db.execute(
+      'SELECT id, role, status, manager_id FROM users WHERE id=? LIMIT 1', [managerId]
+    );
+    const mgr = mRows[0];
+    if (!mgr) throw notFound('Manager not found.');
+    if (mgr.status !== 'active') throw badRequest('Manager account is inactive.');
+
+    // Walk up from the new manager; if we reach the target, this edge closes a loop.
+    let cursor = mgr.manager_id;
+    for (let hops = 0; cursor && hops < 100; hops++) {
+      if (Number(cursor) === id) {
+        throw badRequest('That assignment would create a reporting loop.');
+      }
+      const [rows] = await db.execute('SELECT manager_id FROM users WHERE id=? LIMIT 1', [cursor]);
+      cursor = rows[0]?.manager_id ?? null;
+    }
+  }
+
+  await db.execute('UPDATE users SET manager_id=? WHERE id=?', [managerId, id]);
+  return { success: true };
+}
+
 /** POST action=delete_user — deactivates instead if the user has real ideas. */
 export async function deleteUser(db, actor, id) {
   id = parseInt(id, 10) || 0;
@@ -301,5 +346,5 @@ function isValidEmail(email) {
 }
 
 export default {
-  list, adminUsers, createUser, updateUser, deleteUser, managers, hierarchy, updateProfile,
+  list, adminUsers, createUser, updateUser, updateManager, deleteUser, managers, hierarchy, updateProfile,
 };

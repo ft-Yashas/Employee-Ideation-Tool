@@ -341,32 +341,32 @@ export default function SubmitPage() {
 
             <div className="form-group">
               <label>{t('preview.title_label')}</label>
-              <div className="form-control" style={{ background:'#f8f9fe' }}>{title}</div>
+              <div className="form-control" style={{ background:'var(--panel-bg)' }}>{title}</div>
             </div>
             <div className="form-group">
               <label>{t('preview.situation')}</label>
-              <div className="form-control" style={{ background:'#f8f9fe',height:'auto',minHeight:60 }}>{situation}</div>
+              <div className="form-control" style={{ background:'var(--panel-bg)',height:'auto',minHeight:60 }}>{situation}</div>
             </div>
             <div className="form-group">
               <label>{t('preview.solution')}</label>
-              <div className="form-control" style={{ background:'#f8f9fe',height:'auto',minHeight:60 }}>{solution}</div>
+              <div className="form-control" style={{ background:'var(--panel-bg)',height:'auto',minHeight:60 }}>{solution}</div>
             </div>
             <div className="form-row">
               <div>
                 <label>{t('preview.impact_areas')}</label>
-                <div className="form-control" style={{ background:'#f8f9fe' }}>
+                <div className="form-control" style={{ background:'var(--panel-bg)' }}>
                   {impactAreas.map(a => translateArea(a, t)).join(', ') || t('preview.none_selected')}
                 </div>
               </div>
               <div>
                 <label>{t('preview.impact_level')}</label>
-                <div className="form-control" style={{ background:'#f8f9fe' }}>{translateImpact(impactLevel, t)}</div>
+                <div className="form-control" style={{ background:'var(--panel-bg)' }}>{translateImpact(impactLevel, t)}</div>
               </div>
             </div>
             {co1Name && (
               <div className="form-group">
                 <label>{t('preview.co_suggesters')}</label>
-                <div className="form-control" style={{ background:'#f8f9fe' }}>{co1Name}{co2Name ? ', ' + co2Name : ''}</div>
+                <div className="form-control" style={{ background:'var(--panel-bg)' }}>{co1Name}{co2Name ? ', ' + co2Name : ''}</div>
               </div>
             )}
 

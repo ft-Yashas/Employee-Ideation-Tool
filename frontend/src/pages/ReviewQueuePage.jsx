@@ -156,15 +156,15 @@ export default function ReviewQueuePage() {
                 <div style={{ display:'flex',gap:6,flexWrap:'wrap',marginTop:6 }}>
                   {dueDate && (
                     <span style={{ fontSize:11,padding:'2px 8px',borderRadius:20,fontWeight:600,
-                      border:`1px solid ${isOverdue?'#fecaca':'#e2e8f0'}`,
-                      background:isOverdue?'#fee2e2':'var(--chip-bg)',
-                      color:isOverdue?'#ef4444':'var(--text-muted)' }}>
+                      border:`1px solid ${isOverdue?'var(--danger-dim)':'var(--border)'}`,
+                      background:isOverdue?'var(--danger-light)':'var(--chip-bg)',
+                      color:isOverdue?'var(--danger)':'var(--text-muted)' }}>
                       {isOverdue ? `⚠ ${t('review.overdue')}` : `⏱ ${t('review.due')}`} {fmtDate(i.review_due_date)}
                     </span>
                   )}
                   {parseInt(i.escalation_level) > 0 && (
                     <span style={{ fontSize:11,padding:'2px 8px',borderRadius:20,fontWeight:600,
-                      border:'1px solid #e9d5ff',background:'#f5f3ff',color:'#4b5563' }}>
+                      border:'1px solid var(--primary-dim)',background:'var(--primary-light)',color:'var(--primary)' }}>
                       ↑ L{i.escalation_level}
                     </span>
                   )}
@@ -173,14 +173,14 @@ export default function ReviewQueuePage() {
 
               {isMultiRv && (
                 <div style={{ marginTop:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
-                  <span style={{ fontSize:11,background:'#eff6ff',color:'#1d4ed8',padding:'2px 9px',borderRadius:'var(--r-full)',fontWeight:600,border:'1px solid #bfdbfe' }}>
+                  <span style={{ fontSize:11,background:'var(--info-light)',color:'var(--info)',padding:'2px 9px',borderRadius:'var(--r-full)',fontWeight:600,border:'1px solid var(--info-dim)' }}>
                     {t('review.committee_badge')}
                   </span>
                   <span style={{ fontSize:11,color:'var(--subtle)' }}>
                     {i.approved_count||0} {t('committee.approved_count')} · {i.rejected_count||0} {t('committee.rejected_count')} · {pending} {t('committee.pending_count')}
                   </span>
                   {isMyPending && (
-                    <span style={{ fontSize:11,background:'#fef3c7',color:'#92400e',padding:'2px 9px',borderRadius:'var(--r-full)',fontWeight:600,border:'1px solid #fde68a' }}>
+                    <span style={{ fontSize:11,background:'var(--warning-light)',color:'var(--warning)',padding:'2px 9px',borderRadius:'var(--r-full)',fontWeight:600,border:'1px solid var(--warning-dim)' }}>
                       {t('review.vote_needed')}
                     </span>
                   )}
