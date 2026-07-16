@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useBranding } from '../context/BrandingContext';
 import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
-import { usersApi, ideasApi, settingsApi, scoreApi } from '../services/api';
+import { usersApi, ideasApi, settingsApi, scoreApi, brandingApi } from '../services/api';
 import { formatRole, statusBadge, translateStatus, fmtDate } from '../utils/helpers';
 import IdeaDetailModal from '../components/IdeaDetailModal';
 import BulkImportModal from '../components/BulkImportModal';
@@ -329,6 +330,8 @@ export default function AdminPage() {
       {tab === 3 && <HierarchyTab t={t} showToast={showToast} currentUserId={user?.id} />}
 
       {/* System */}
+      {tab === 4 && <BrandingCard t={t} showToast={showToast} />}
+
       {tab === 4 && settings && (
         <div style={{ maxWidth:600,marginTop:16 }}>
           <form onSubmit={handleSaveSettings}>
@@ -414,6 +417,182 @@ export default function AdminPage() {
         />
       )}
     </>
+  );
+}
+
+/*
+ * ── Organization Branding ──────────────────────────────────────────
+ * Lets a tenant admin set the name and PNG logo that everyone in their own
+ * organisation sees in the app shell. Scope is implicit and cannot be widened
+ * from here: the server resolves the tenant from the caller's token, so an admin
+ * can only ever edit their own organisation.
+ *
+ * The name and the logo save independently. Uploading a logo is the slow,
+ * failure-prone half (a multi-hundred-KB multipart request), and tying it to the
+ * name field would mean a rejected file also discarded a rename the admin had
+ * just typed.
+ */
+const MAX_LOGO_BYTES = 1024 * 1024; // keep in step with brandingService
+
+function BrandingCard({ t, showToast }) {
+  const { orgName, logo, hasCustomLogo, refresh } = useBranding();
+  const [name, setName]         = useState('');
+  const [savingName, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview]   = useState(null);
+  const fileRef                  = useRef(null);
+
+  // Seed the field once branding has loaded, but never clobber what the admin is
+  // actively typing.
+  useEffect(() => { setName((cur) => (cur ? cur : orgName || '')); }, [orgName]);
+
+  async function saveName(e) {
+    e.preventDefault();
+    const next = name.trim();
+    if (!next) { showToast(t('admin.org_name_required'), 'warning'); return; }
+    setSaving(true);
+    try {
+      const res = await brandingApi.updateName(next);
+      if (res.data?.success) {
+        await refresh();
+        showToast(t('admin.branding_saved'), 'success');
+      } else {
+        showToast(res.data?.error || t('msg.server_error'), 'danger');
+      }
+    } catch (err) {
+      showToast(err?.response?.data?.error || t('msg.network_error'), 'danger');
+    }
+    setSaving(false);
+  }
+
+  function pickFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) { setPreview(null); return; }
+    // Checked again on the server against the file's actual magic bytes — this
+    // is only here to fail fast before a pointless upload.
+    if (file.type !== 'image/png' || !/\.png$/i.test(file.name)) {
+      showToast(t('admin.logo_not_png'), 'warning');
+      e.target.value = '';
+      setPreview(null);
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      showToast(t('admin.logo_too_big'), 'warning');
+      e.target.value = '';
+      setPreview(null);
+      return;
+    }
+    setPreview(URL.createObjectURL(file));
+  }
+
+  async function uploadLogo() {
+    const file = fileRef.current?.files?.[0];
+    if (!file) { showToast(t('admin.logo_pick_first'), 'warning'); return; }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('logo', file);
+      const res = await brandingApi.updateLogo(fd);
+      if (res.data?.success) {
+        await refresh();
+        setPreview(null);
+        if (fileRef.current) fileRef.current.value = '';
+        showToast(t('admin.logo_saved'), 'success');
+      } else {
+        showToast(res.data?.error || t('msg.server_error'), 'danger');
+      }
+    } catch (err) {
+      showToast(err?.response?.data?.error || t('msg.network_error'), 'danger');
+    }
+    setUploading(false);
+  }
+
+  async function removeLogo() {
+    setUploading(true);
+    try {
+      const res = await brandingApi.removeLogo();
+      if (res.data?.success) {
+        await refresh();
+        setPreview(null);
+        if (fileRef.current) fileRef.current.value = '';
+        showToast(t('admin.logo_removed'), 'success');
+      } else {
+        showToast(res.data?.error || t('msg.server_error'), 'danger');
+      }
+    } catch (err) {
+      showToast(err?.response?.data?.error || t('msg.network_error'), 'danger');
+    }
+    setUploading(false);
+  }
+
+  return (
+    <div className="card" style={{ maxWidth:600,marginTop:16 }}>
+      <div className="card-title">{t('admin.branding_heading')}</div>
+      <div style={{ fontSize:12,color:'var(--muted)',marginBottom:16,lineHeight:1.6 }}>
+        {t('admin.branding_desc')}
+      </div>
+
+      <form onSubmit={saveName}>
+        <div className="form-group">
+          <label>{t('admin.org_name')}</label>
+          <input
+            className="form-control"
+            value={name}
+            maxLength={100}
+            placeholder={t('admin.org_name_ph')}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <button type="submit" className="btn btn-primary" disabled={savingName}>
+          {savingName ? t('admin.saving') : t('admin.save_org_name')}
+        </button>
+      </form>
+
+      <div style={{ height:1,background:'var(--border)',margin:'20px 0' }} />
+
+      <div className="form-group">
+        <label>{t('admin.org_logo')}</label>
+        <div style={{ fontSize:12,color:'var(--muted)',marginBottom:10 }}>{t('admin.logo_hint')}</div>
+
+        <div style={{ display:'flex',alignItems:'center',gap:14,marginBottom:12 }}>
+          <div style={{
+            width:120,height:56,display:'flex',alignItems:'center',justifyContent:'center',
+            background:'#fff',border:'1px solid var(--border)',borderRadius:8,padding:6,
+          }}>
+            <img
+              src={preview || logo}
+              alt={orgName}
+              style={{ maxWidth:'100%',maxHeight:'100%',objectFit:'contain' }}
+              onError={(e) => { e.target.style.display = 'none'; }}
+            />
+          </div>
+          <div style={{ fontSize:12,color:'var(--muted)' }}>
+            {preview
+              ? t('admin.logo_preview')
+              : hasCustomLogo ? t('admin.logo_current') : t('admin.logo_none')}
+          </div>
+        </div>
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png"
+          className="form-control"
+          onChange={pickFile}
+        />
+      </div>
+
+      <div style={{ display:'flex',gap:8 }}>
+        <button type="button" className="btn btn-primary" onClick={uploadLogo} disabled={uploading || !preview}>
+          {uploading ? t('admin.saving') : t('admin.logo_upload')}
+        </button>
+        {hasCustomLogo && (
+          <button type="button" className="btn btn-outline" onClick={removeLogo} disabled={uploading}>
+            {t('admin.logo_remove')}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

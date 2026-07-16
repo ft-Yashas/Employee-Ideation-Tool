@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { BrandingProvider } from './context/BrandingContext';
 import { ToastProvider } from './context/ToastContext';
 import { LangProvider } from './context/LangContext';
 import { NotifProvider } from './context/NotifContext';
@@ -96,13 +97,15 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <LangProvider>
-          <ToastProvider>
-            <NotifProvider>
-              <AppRoutes />
-            </NotifProvider>
-          </ToastProvider>
-        </LangProvider>
+        <BrandingProvider>
+          <LangProvider>
+            <ToastProvider>
+              <NotifProvider>
+                <AppRoutes />
+              </NotifProvider>
+            </ToastProvider>
+          </LangProvider>
+        </BrandingProvider>
       </AuthProvider>
     </BrowserRouter>
   );

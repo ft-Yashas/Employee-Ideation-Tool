@@ -152,7 +152,18 @@ function CreateOrgModal({ onClose, onCreated, t }) {
         alert(`✅ ${t('pa.created')}\n\n${t('pa.org_slug')}: ${res.data.slug}\n${t('pa.admin_email')}: ${res.data.admin_email}`);
         onCreated();
       } else { setError(res.data.error || t('pa.create_failed')); }
-    } catch { setError(t('msg.server_error')); }
+    } catch (err) {
+      /*
+       * axios throws on every non-2xx, so this branch — not the one above — is
+       * what runs for a rejected create. It used to discard `err` entirely and
+       * show "Server error. Please try again." for all of them, which hid the
+       * only messages that tell the admin what to fix: "Admin password must be
+       * at least 12 characters.", "Organization code already in use.",
+       * "Invalid admin email address.". A 12-character password rule is
+       * impossible to satisfy when the error says "server error".
+       */
+      setError(err?.response?.data?.error || t('msg.server_error'));
+    }
     setSaving(false);
   }
 

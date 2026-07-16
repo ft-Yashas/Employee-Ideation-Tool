@@ -263,6 +263,19 @@ export const uploadApi = {
   },
 };
 
+// ── Branding (per-tenant org name + logo) ────────────────────────
+// `get` is readable by every user in the tenant — it is what their sidebar
+// renders. The writes are admin-only and rejected server-side for anyone else.
+// The logo comes back inlined as a data: URI, so it drops straight into an
+// <img src> with no second, credential-carrying request.
+export const brandingApi = {
+  get: () => api.get('/branding'),
+  updateName: (org_name) => api.put('/branding', { org_name }),
+  // No hand-written Content-Type — see the FormData note on uploadApi.
+  updateLogo: (formData) => api.post('/branding/logo', formData),
+  removeLogo: () => api.delete('/branding/logo'),
+};
+
 // ── Platform (platform admin only) ───────────────────────────────
 export const platformApi = {
   tenants: () => api.get('/platform/tenants'),

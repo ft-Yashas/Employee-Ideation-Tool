@@ -1,5 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useBranding } from '../../context/BrandingContext';
 import { useLang } from '../../context/LangContext';
 import { isPrivileged, isAdmin, isSuperAdmin, isPlatformAdmin, formatRole } from '../../utils/helpers';
 
@@ -23,6 +24,7 @@ const NAV_ICONS = {
 
 export default function Sidebar({ collapsed, onToggle }) {
   const { user } = useAuth();
+  const { orgName, logo } = useBranding();
   const { t }    = useLang();
   const navigate  = useNavigate();
   const location  = useLocation();
@@ -53,14 +55,23 @@ export default function Sidebar({ collapsed, onToggle }) {
 
   return (
     <div id="sidebar" className={collapsed ? 'collapsed' : ''}>
-      <div className="sidebar-logo" onClick={onToggle} style={{ cursor:'pointer' }}>
+      {/*
+        * The organisation's own logo and name, not IFQM's — a TVS employee sees
+        * TVS here, an L&T employee sees L&T. Both fall back to the IFQM mark and
+        * the app name until that tenant's admin has set their branding, and for
+        * platform admins, who sit outside any tenant. The login page keeps the
+        * IFQM logo deliberately: there is no tenant resolved before sign-in.
+        */}
+      <div className="sidebar-logo" onClick={onToggle} style={{ cursor:'pointer' }} title={orgName}>
         <img
-          src="/assets/ifqm-logo.png"
-          alt="IFQM"
+          src={logo}
+          alt={orgName}
           style={{ height:28,flexShrink:0,background:'#fff',borderRadius:6,padding:'3px 8px',objectFit:'contain',boxShadow:'0 1px 3px rgba(0,0,0,.15)' }}
           onError={e => { e.target.style.display='none'; }}
         />
-        <span style={{ fontWeight:700,letterSpacing:'-.3px' }}>{t('app.name')}</span>
+        <span style={{ fontWeight:700,letterSpacing:'-.3px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>
+          {orgName || t('app.name')}
+        </span>
       </div>
 
       {!isPA && (

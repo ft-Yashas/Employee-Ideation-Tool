@@ -6,6 +6,15 @@
 --  schema.sql referenced idea_comments in an index but never created the
 --  table, so provisioning a new tenant from schema.sql alone failed. This
 --  consolidated file produces a tenant identical to the existing working DBs.
+--
+--  KEEP THIS FILE IN STEP WITH db/migrations/*.sql.
+--  createTenant() provisions a new organisation from THIS FILE ALONE — it never
+--  runs the migrations, which exist to upgrade databases that already exist. So
+--  anything a migration adds must also be born here, or every organisation
+--  created from the UI starts life missing it. That is not hypothetical: the
+--  columns from migrations 001 and 002 were absent here, and "Create New
+--  Organisation" died on `Unknown column 'password_changed_at' in 'field list'`
+--  while the modal showed only a generic "Server error. Please try again."
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS users (
@@ -24,7 +33,20 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_initials VARCHAR(4),
   status          ENUM('active','inactive') NOT NULL DEFAULT 'active',
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
+  -- ── from migration 001 (production hardening) ──
+  -- Stamped into every token so the auth middleware can reject sessions opened
+  -- before the password last changed. createTenant writes it on the org's first
+  -- admin, so a tenant born without this column cannot be created at all.
+  password_changed_at DATETIME NULL DEFAULT NULL,
+  deactivated_at      DATETIME NULL DEFAULT NULL,
+  -- ── from migration 002 (bulk user import) ──
+  must_change_password TINYINT(1) NOT NULL DEFAULT 0,
+  date_of_birth        DATE NULL DEFAULT NULL,
+  activated_at         DATETIME NULL DEFAULT NULL,
+  FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_users_email_status (email, status),
+  INDEX idx_users_name (name),
+  INDEX idx_users_manager (manager_id)
 );
 
 CREATE TABLE IF NOT EXISTS ideas (
@@ -216,11 +238,50 @@ INSERT IGNORE INTO org_settings (key_name, value) VALUES
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   user_id     INT NOT NULL,
+  -- selector: from migration 001. Reset verification used to bcrypt-compare the
+  -- candidate against every unexpired row — O(n) key-stretching per request.
+  -- Tokens are `selector.verifier`: an indexed lookup, then one bcrypt compare.
+  selector    CHAR(32) NULL,
   token_hash  VARCHAR(255) NOT NULL,
   expires_at  DATETIME NOT NULL,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY uniq_prt_selector (selector),
+  INDEX idx_prt_expires (expires_at)
 );
+
+-- ── Bulk employee import (from migration 002) ────────────────────────
+CREATE TABLE IF NOT EXISTS user_import_jobs (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  actor_id        INT NULL,
+  actor_name      VARCHAR(100) NULL,
+  filename        VARCHAR(255) NULL,
+  status          ENUM('pending','running','completed','failed') NOT NULL DEFAULT 'pending',
+  phase           VARCHAR(24) NULL,
+  total_rows      INT NOT NULL DEFAULT 0,
+  processed_rows  INT NOT NULL DEFAULT 0,
+  created_count   INT NOT NULL DEFAULT 0,
+  skipped_count   INT NOT NULL DEFAULT 0,
+  error_message   TEXT NULL,
+  started_at      DATETIME NULL,
+  finished_at     DATETIME NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_import_status (status),
+  INDEX idx_import_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_import_errors (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  job_id       INT NOT NULL,
+  row_number   INT NOT NULL,
+  employee_id  VARCHAR(191) NULL,
+  email        VARCHAR(191) NULL,
+  message      VARCHAR(255) NOT NULL,
+  FOREIGN KEY (job_id) REFERENCES user_import_jobs(id) ON DELETE CASCADE,
+  INDEX idx_import_err_job (job_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE INDEX IF NOT EXISTS idx_ideas_status ON ideas(status);
 CREATE INDEX IF NOT EXISTS idx_ideas_submitted_at ON ideas(submitted_at);
@@ -233,3 +294,6 @@ CREATE INDEX IF NOT EXISTS idx_idea_comments_idea ON idea_comments(idea_id);
 CREATE INDEX IF NOT EXISTS idx_idea_workflow_idea ON idea_workflow(idea_id);
 CREATE INDEX IF NOT EXISTS idx_idea_reviewers_idea_reviewer ON idea_reviewers(idea_id, reviewer_id);
 CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id);
+-- from migration 001
+CREATE INDEX IF NOT EXISTS idx_ideas_status_submitted ON ideas(status, submitted_at);
+CREATE INDEX IF NOT EXISTS idx_ideas_submitter ON ideas(submitter_id);

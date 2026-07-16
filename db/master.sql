@@ -57,3 +57,12 @@ CREATE TABLE IF NOT EXISTS login_attempts (
                              ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_login_attempts_last (last_attempt)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ── Tenant branding (organisation display name + PNG logo) ───────────────────
+-- `name` and `logo_url` already exist above. logo_url was declared but never
+-- populated; it now holds the *stored filename* of the tenant's uploaded PNG,
+-- not a public URL. The bytes live under backend/uploads/<slug>/ next to idea
+-- attachments, which is deliberately NOT web-accessible — they are served
+-- inline (as a data: URI) from the authenticated GET /api/branding.
+-- logo_updated_at is what lets a client tell that an admin replaced the file.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_updated_at DATETIME NULL;
