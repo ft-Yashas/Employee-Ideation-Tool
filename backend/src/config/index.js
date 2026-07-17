@@ -90,6 +90,14 @@ const config = {
   // ── Uploads — MAX_FILE_MB in config.php ──
   maxFileMb: int(process.env.MAX_FILE_MB, 10),
 
+  // ── DB pool sizing ──
+  // Per-pool cap (one pool per tenant schema, plus the master registry).
+  // Requests hold a connection for milliseconds, so 10 sustains hundreds of
+  // req/s per tenant — but at scale this must be tunable without a deploy.
+  // Budget: (number of tenants + 1) × DB_POOL_SIZE must stay under MySQL's
+  // max_connections (151 by default — raise it in my.cnf for many tenants).
+  dbPoolSize: int(process.env.DB_POOL_SIZE, 10),
+
   // ── AI providers (blank by default → heuristic fallback) ──
   ai: {
     provider: (process.env.AI_PROVIDER || '').trim().toLowerCase(),

@@ -12,10 +12,10 @@
  * about any employee, so editing them does not breach the boundary in
  * platformService.js. Two things still need care and are handled below:
  *
- *   • smtp_pass is a live credential belonging to the customer. It is masked on
- *     read and preserved on write, exactly as the tenant's own settings screen
- *     does — the vendor can point a tenant at a mail server without ever being
- *     shown their mail password.
+ *   • smtp_pass is a live credential belonging to the customer. It is never
+ *     returned at all (see "Why there is no password mask here" below) — the
+ *     vendor can point a tenant at a mail server without ever being shown
+ *     their mail password.
  *   • the health view counts rows and bytes. It must never list what is in them.
  */
 import path from 'node:path';
@@ -238,7 +238,7 @@ export async function createAdmin(body) {
 
   const [res] = await masterDb().execute(
     'INSERT INTO platform_admins (name, email, password_hash) VALUES (?, ?, ?)',
-    [name, email, bcrypt.hashSync(password, 12)]
+    [name, email, await bcrypt.hash(password, 12)]
   );
   logger.info(`platform: admin account created (${email})`);
   return { success: true, id: res.insertId, name, email };
@@ -280,11 +280,11 @@ export async function changeOwnPassword(currentAdmin, body) {
 
   // Proving possession of the current password is what stops a borrowed, still
   // signed-in browser from being turned into a permanent takeover.
-  if (!bcrypt.compareSync(String(body?.current_password ?? ''), row.password_hash)) {
+  if (!(await bcrypt.compare(String(body?.current_password ?? ''), row.password_hash))) {
     throw badRequest('Current password is incorrect.');
   }
   const next = assertPasswordStrength(body?.new_password, { label: 'New password' });
-  await masterDb().execute('UPDATE platform_admins SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(next, 12), currentId]);
+  await masterDb().execute('UPDATE platform_admins SET password_hash = ? WHERE id = ?', [await bcrypt.hash(next, 12), currentId]);
 
   logger.info(`platform: admin ${currentId} changed their password`);
   return { success: true };

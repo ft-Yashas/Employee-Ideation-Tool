@@ -140,7 +140,7 @@ export async function createUser(db, actor, body) {
   if (dup.length) throw new ApiError(409, 'Email or employee ID already exists.');
 
   const initials = avatarInitials(name) || firstCharUpper(name);
-  const hash = bcrypt.hashSync(password, 12);
+  const hash = await bcrypt.hash(password, 12);
 
   const [result] = await db.execute(
     `INSERT INTO users (employee_id, name, email, password_hash, department, business_unit,

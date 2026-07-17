@@ -127,7 +127,11 @@ export async function login({ email, password, orgSlug, host }) {
       [email]
     );
     const pa = rows[0];
-    if (pa && bcrypt.compareSync(password, pa.password_hash)) {
+    // Async compare, here and everywhere below: bcryptjs's sync variant pins
+    // the event loop for the full ~250ms of key stretching, during which the
+    // process serves NOBODY. One thread × a 9am sign-in surge made login
+    // latency the whole API's latency. The async variant yields between rounds.
+    if (pa && (await bcrypt.compare(password, pa.password_hash))) {
       const session = {
         id: `pa_${pa.id}`,
         name: pa.name,
@@ -164,7 +168,12 @@ export async function login({ email, password, orgSlug, host }) {
   );
   const user = rows[0];
 
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+  // Always run the compare, even when the email matched nothing — against a
+  // burned dummy hash. Short-circuiting on !user answered "no such account" in
+  // ~5ms and "wrong password" in ~250ms, so response time alone enumerated
+  // which emails exist in an organisation.
+  const passwordOk = await bcrypt.compare(password, user ? user.password_hash : DUMMY_HASH);
+  if (!user || !passwordOk) {
     await recordFailedAttempt(loginId);
     const after = await getFailedAttempts(loginId);
     const remaining = Math.max(0, MAX_ATTEMPTS - after.count);
@@ -240,7 +249,7 @@ export async function forgotPassword({ email, orgSlug, host }) {
   // run exactly ONE bcrypt compare. Previously verification bcrypt-compared the
   // candidate against every unexpired row in the table, which let anyone burn
   // arbitrary CPU by posting junk tokens.
-  const { token, selector, verifierHash } = makeResetToken();
+  const { token, selector, verifierHash } = await makeResetToken();
   const expiresAt = new Date(Date.now() + 3600 * 1000)
     .toISOString()
     .slice(0, 19)
@@ -293,7 +302,7 @@ export async function resetPassword({ token, password, orgSlug, host }) {
   const matched = await findResetToken(db, token);
   if (!matched) throw badRequest('Invalid or expired reset link. Please request a new one.');
 
-  const hash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
+  const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
   // Stamping password_changed_at is what actually kills the old sessions: the
   // auth middleware rejects any JWT issued before this moment. Without it, a
@@ -351,7 +360,7 @@ export async function changePassword(db, user, { currentPassword, newPassword, o
 
   // Verify the current password even during a forced change: possession of a
   // token alone must not be enough to overwrite the credential.
-  if (!bcrypt.compareSync(currentPassword, row.password_hash)) {
+  if (!(await bcrypt.compare(currentPassword, row.password_hash))) {
     throw badRequest('Your current password is incorrect.');
   }
 
@@ -359,11 +368,11 @@ export async function changePassword(db, user, { currentPassword, newPassword, o
   // precisely because it was temporary.
   assertPasswordStrength(newPassword, { label: 'New password' });
 
-  if (bcrypt.compareSync(newPassword, row.password_hash)) {
+  if (await bcrypt.compare(newPassword, row.password_hash)) {
     throw badRequest('The new password must be different from your current one.');
   }
 
-  const hash = bcrypt.hashSync(newPassword, BCRYPT_ROUNDS);
+  const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
   await db.execute(
     `UPDATE users
         SET password_hash = ?, password_changed_at = NOW(), must_change_password = 0,
@@ -395,14 +404,18 @@ export async function changePassword(db, user, { currentPassword, newPassword, o
 // ── Reset-token helpers ─────────────────────────────────────────────────────
 const BCRYPT_ROUNDS = 12; // ~250ms; was 10
 
+// A real hash of nothing anyone knows, used to keep the compare running when
+// the email matched no account (see login). Module-load cost, paid once.
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), BCRYPT_ROUNDS);
+
 /** Mint a `<selector>.<verifier>` reset token. Only the verifier is hashed. */
-function makeResetToken() {
+async function makeResetToken() {
   const selector = crypto.randomBytes(16).toString('hex'); // 32 chars, indexed
   const verifier = crypto.randomBytes(32).toString('hex'); // the actual secret
   return {
     token: `${selector}.${verifier}`,
     selector,
-    verifierHash: bcrypt.hashSync(verifier, BCRYPT_ROUNDS),
+    verifierHash: await bcrypt.hash(verifier, BCRYPT_ROUNDS),
   };
 }
 
@@ -420,7 +433,7 @@ async function findResetToken(db, token) {
   );
   const row = rows[0];
   if (!row) return null;
-  return bcrypt.compareSync(verifier, row.token_hash) ? row : null;
+  return (await bcrypt.compare(verifier, row.token_hash)) ? row : null;
 }
 
 /**

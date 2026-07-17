@@ -225,7 +225,7 @@ export async function createTenant(body) {
     }
 
     const initials = adminName.split(' ').filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || 'OA';
-    const hash = bcrypt.hashSync(adminPass, 12);
+    const hash = await bcrypt.hash(adminPass, 12);
     await conn.execute(
       `INSERT INTO users (employee_id, name, email, password_hash, role, avatar_initials, status, password_changed_at)
        VALUES (?, ?, ?, ?, 'admin', ?, 'active', NOW())`,
@@ -364,7 +364,7 @@ export async function resetTenantAdminPassword(tenantId, body) {
       `UPDATE users
           SET password_hash = ?, must_change_password = 1, password_changed_at = NOW()
         WHERE id = ?`,
-      [bcrypt.hashSync(tempPassword, 12), admin.id]
+      [await bcrypt.hash(tempPassword, 12), admin.id]
     );
 
     logger.info(`platform: admin password reset for ${email} @ ${t.slug}`);

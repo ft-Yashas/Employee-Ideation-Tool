@@ -14,6 +14,14 @@ let pool = null;
  * callers that must tolerate a missing master DB should wrap queries in
  * try/catch (as the PHP code did with its fallback tenant).
  */
+/** Close the singleton pool (graceful shutdown, test teardown). */
+export async function closeMasterPool() {
+  if (!pool) return;
+  const p = pool;
+  pool = null;
+  await p.end().catch(() => {});
+}
+
 export function masterDb() {
   if (pool) return pool;
   pool = mysql.createPool({
@@ -23,7 +31,7 @@ export function masterDb() {
     database: config.masterDb.database,
     charset: 'utf8mb4',
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: config.dbPoolSize,
     namedPlaceholders: false,
     dateStrings: true, // keep DATE/DATETIME as strings, matching PDO defaults
   });
