@@ -120,6 +120,12 @@ const PASSWORD_CHANGE_ALLOWED = [
   '/api/auth/change-password',
   '/api/auth/logout',
   '/api/auth/me',
+  // Support stays reachable on a temporary password — deliberately. The person
+  // whose credentials don't work is exactly the person who needs to raise a
+  // ticket, and 16 of one real org's 17 users were locked out of Support by
+  // this gate. The prefix covers raise/list/read/reply/close of their OWN
+  // tickets and nothing else; every other endpoint still 403s.
+  '/api/support/tickets',
 ];
 
 /**

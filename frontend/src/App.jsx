@@ -40,7 +40,11 @@ function PrivateRoute({ children }) {
   // their name and birth year — guessable by any colleague. Until they replace
   // it, this is the only screen they get. The server enforces the same rule
   // (every other endpoint 403s), so this is for their benefit, not for security.
-  if (user.must_change_password) return <ForcePasswordChangePage />;
+  // Support is the one exception, on both sides of the wire: the person whose
+  // password doesn't work is the person who most needs to raise a ticket.
+  if (user.must_change_password && location.pathname !== '/support') {
+    return <ForcePasswordChangePage />;
+  }
 
   // Platform admin can only access /platform routes
   if (user.role === 'platform_admin' && !location.pathname.startsWith('/platform')) {

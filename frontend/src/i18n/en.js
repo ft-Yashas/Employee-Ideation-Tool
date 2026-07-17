@@ -732,6 +732,7 @@ export default {
   'pw.mismatch':'The two new passwords do not match.',
   'pw.same_as_current':'Your new password must be different from the temporary one.',
   'pw.changed':'Password updated. Welcome!',
+  'pw.need_help':'Need help?',
   'sa.too_many_tree':'This organisation has {total} people — showing the first {shown}. The full org chart is too large to draw; use the Users tab to search for someone.',
 
   // ── Relative time ──

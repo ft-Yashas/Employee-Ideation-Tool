@@ -18,6 +18,8 @@
  *     IFQM's private notes on the account.
  */
 import { masterDb } from '../database/master.js';
+import { getTenantPool } from '../database/tenant.js';
+import { getOrgSettings, sendSmtpEmail } from './mailerService.js';
 import { badRequest, forbidden, notFound } from '../utils/respond.js';
 import logger from '../utils/logger.js';
 
@@ -45,6 +47,60 @@ async function assignCode(db, id) {
   const code = `TKT-${String(id).padStart(5, '0')}`;
   await db.execute('UPDATE support_tickets SET ticket_code = ? WHERE id = ?', [code, id]);
   return code;
+}
+
+/**
+ * Email the person who raised a ticket when IFQM replies to it. The requester
+ * is often someone who cannot use the app right now (a broken temporary
+ * password is the canonical support ticket), so the answer must reach them
+ * outside the app.
+ *
+ * Mail goes out through the requester's own org's SMTP settings — email config
+ * is per-tenant, and this is a message to that tenant's user. Best-effort by
+ * design: the reply is already saved, and a missing or broken SMTP config must
+ * never turn it into a 500. Callers do not await this.
+ */
+async function emailRequesterAboutReply(ticket, authorName, replyBody) {
+  // Platform-raised tickets have no requester to notify.
+  if (!ticket.requester_email) return;
+  try {
+    const [[tenant] = []] = await masterDb().execute(
+      'SELECT * FROM tenants WHERE id = ? LIMIT 1',
+      [ticket.tenant_id]
+    );
+    if (!tenant) return;
+
+    const settings = await getOrgSettings(getTenantPool(tenant));
+    if (settings.email_enabled !== '1' || !String(settings.smtp_host || '').trim()) return;
+
+    const html =
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>' +
+      '<body style="font-family:Arial,sans-serif;padding:20px;color:#1e293b">' +
+      `<h2 style="color:#4f46e5">IFQM Support — ${escapeHtml(ticket.ticket_code)}</h2>` +
+      `<p>Hi ${escapeHtml(ticket.requester_name)},</p>` +
+      `<p>${escapeHtml(authorName)} replied to your ticket &ldquo;${escapeHtml(ticket.subject)}&rdquo;:</p>` +
+      '<blockquote style="margin:0;padding:12px 16px;background:#f1f5f9;border-left:3px solid #4f46e5;white-space:pre-line">' +
+      escapeHtml(replyBody) +
+      '</blockquote>' +
+      '<p style="color:#64748b;font-size:12px">To respond, open the Support page in IFQM — replies to this email are not received.</p>' +
+      '</body></html>';
+
+    await sendSmtpEmail(
+      settings,
+      ticket.requester_email,
+      ticket.requester_name,
+      `[${ticket.ticket_code}] ${ticket.subject}`,
+      html
+    );
+  } catch (e) {
+    logger.error(`support: reply email for ${ticket.ticket_code} failed`, e.message);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c])
+  );
 }
 
 // ── Tenant side ────────────────────────────────────────────────────
@@ -258,6 +314,11 @@ export async function replyAsPlatform(admin, id, body) {
   } else {
     await db.execute('UPDATE support_tickets SET updated_at = NOW() WHERE id = ?', [ticket.id]);
   }
+
+  // Internal notes are IFQM's private record — the customer must not be told
+  // one was written, let alone shown its contents.
+  if (!isInternal) void emailRequesterAboutReply(ticket, admin.name, message);
+
   return { success: true, is_internal: isInternal };
 }
 

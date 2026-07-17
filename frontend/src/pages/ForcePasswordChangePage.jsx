@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
@@ -15,6 +16,7 @@ export default function ForcePasswordChangePage() {
   const { user, changePassword, logout } = useAuth();
   const { t } = useLang();
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const [current, setCurrent] = useState('');
   const [next, setNext]       = useState('');
@@ -87,8 +89,13 @@ export default function ForcePasswordChangePage() {
           </form>
 
           <div className="separator"></div>
-          <div style={{ textAlign:'center' }}>
+          <div style={{ textAlign:'center',display:'flex',gap:8,justifyContent:'center' }}>
             <button className="btn btn-outline btn-sm" onClick={logout}>{t('topbar.logout')}</button>
+            {/* The one other place a gated user may go: someone whose temporary
+                password doesn't work needs a way to say so. */}
+            <button className="btn btn-outline btn-sm" onClick={() => navigate('/support')}>
+              {t('pw.need_help')}
+            </button>
           </div>
           <p style={{ fontSize:11,color:'var(--subtle)',textAlign:'center',marginTop:10 }}>
             {user?.name} · {user?.email}
