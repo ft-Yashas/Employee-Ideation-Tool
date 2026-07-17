@@ -26,12 +26,30 @@ purpose.
 
 ## 1. Provision the database
 
-MySQL 8.0+ (or MariaDB 10.6+). Create the schemas:
+**MariaDB 10.6+** (what XAMPP ships, what development and CI run against). The
+schema files use MariaDB's `ADD COLUMN IF NOT EXISTS` / `CREATE INDEX IF NOT
+EXISTS` guards, which plain MySQL 8 rejects — deploy on MariaDB unless you are
+prepared to port those files. One command builds everything — the registry,
+every tenant schema in it, and all migrations, idempotently:
+
+```bash
+cd backend && npm run setup
+```
+
+> Do **not** provision from `db/schema.sql` or `db/database.sql` by hand — both
+> predate later migrations (`db/schema.sql` is also missing three tables), and
+> the resulting database fails at runtime on columns the code reads on every
+> request. The canonical tenant schema is `backend/schema/tenant_schema.sql`,
+> which is what `npm run setup` (and in-app organisation creation) uses. Manual
+> equivalent, if you must:
 
 ```bash
 mysql -u root -p < db/master.sql          # tenant registry  -> ifqm_master
 mysql -u root -p -e "CREATE DATABASE ifqm_acme CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -u root -p ifqm_acme < db/schema.sql   # one schema per organisation
+mysql -u root -p ifqm_acme < backend/schema/tenant_schema.sql
+mysql -u root -p ifqm_master < db/migrations/001_production_hardening_master.sql
+mysql -u root -p ifqm_acme   < db/migrations/001_production_hardening.sql
+mysql -u root -p ifqm_acme   < db/migrations/002_bulk_user_import.sql
 ```
 
 ### Create the least-privilege application user
@@ -237,8 +255,38 @@ Health endpoints:
 Employee ideas are the entire value of the product. Two things must be backed up:
 
 1. **The databases** — `ifqm_master` *and* every `ifqm_<org>` schema.
-2. **`backend/uploads/`** — the attachments. These live on disk, not in MySQL.
-   A database-only backup silently loses every attached document.
+2. **`backend/uploads/`** — the attachments and tenant logos. These live on
+   disk, not in MySQL. A database-only backup silently loses every attached
+   document.
+
+The built-in, cross-platform way (covers both, with rotation):
+
+```bash
+cd backend && npm run backup
+```
+
+Each run writes `backend/backups/<timestamp>/` containing one restorable `.sql`
+per schema (with `CREATE DATABASE` included) plus a copy of `uploads/`. Tune
+with env vars in `backend/.env`: `BACKUP_DIR` (write somewhere that is synced
+**off the machine**), `BACKUP_KEEP` (runs retained, default 14),
+`BACKUP_UPLOADS=0` to skip the uploads copy, `MYSQLDUMP` if the binary is not
+on PATH.
+
+**Restore** (per schema — the dump recreates the database itself):
+
+```bash
+mysql -u root -p < backups/<timestamp>/ifqm_master.sql
+mysql -u root -p < backups/<timestamp>/ifqm_<org>.sql   # repeat per tenant
+# then copy backups/<timestamp>/uploads/ back to backend/uploads/
+```
+
+**Schedule it** — a backup that depends on someone remembering is not one:
+
+- Linux/macOS cron: `0 2 * * * cd /opt/ifqm/backend && npm run backup`
+- Windows Task Scheduler: daily task running
+  `node C:\path\to\ifqm\backend\scripts\backup.js`
+
+Equivalent hand-rolled script, if you prefer shell + gzip:
 
 ```bash
 #!/bin/bash
@@ -259,6 +307,21 @@ find /var/backups/ifqm -maxdepth 1 -type d -mtime +30 -exec rm -rf {} +
 
 Copy them **off the machine**. Then actually restore one into a scratch database
 and log in against it. An untested backup is not a backup.
+
+---
+
+## 6.5 Logs and error visibility
+
+In production (or with `LOG_TO_FILE=1` anywhere) the backend appends every log
+line to daily files, so crash trails survive whatever launched the process:
+
+- `backend/logs/ifqm-YYYY-MM-DD.log` — everything
+- `backend/logs/error-YYYY-MM-DD.log` — errors only; check this one first
+
+`LOG_DIR` moves them; `LOG_TO_FILE=0` disables in production. Rotation is by
+day — prune old files with the same scheduler that runs backups. For alerting
+(rather than after-the-fact reading), add Sentry: one `Sentry.captureException`
+call in `src/middleware/errorHandler.js` is the integration point.
 
 ---
 

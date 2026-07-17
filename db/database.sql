@@ -1,4 +1,17 @@
 -- ============================================================
+--  DEPRECATED — do not use this file to provision a machine.
+--
+--  It aborted on import for months (a type-less `user_id` column at what was
+--  line 111) — meaning nobody had successfully used it — and it predates the
+--  columns migrations 001/002 added, which auth reads on every request. The
+--  column is fixed so the file at least imports, but the canonical sources are:
+--
+--    db/master.sql                     the registry (ifqm_master)
+--    backend/schema/tenant_schema.sql  one complete tenant schema
+--    npm run setup (backend/)          builds all of it in one command
+-- ============================================================
+
+-- ============================================================
 --  IFQM Employee Ideation Tool – Database Schema
 --  9-role system: trainee, employee, team_lead, project_lead,
 --  manager, senior_manager, executive, admin, super_admin
@@ -111,7 +124,7 @@ CREATE TABLE IF NOT EXISTS idea_workflow (
 CREATE TABLE IF NOT EXISTS idea_votes (
   id         INT AUTO_INCREMENT PRIMARY KEY,
   idea_id    INT NOT NULL,
-  user_id    NOT NULL,
+  user_id    INT NOT NULL,
   rating     TINYINT NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

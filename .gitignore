@@ -30,3 +30,6 @@ Thumbs.db
 .idea/
 
 .gstack/
+
+# Database backups — data, never source
+backend/backups/

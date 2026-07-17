@@ -1,12 +1,16 @@
 {
   "name": "ifqm-backend",
   "version": "1.0.0",
-  "description": "IFQM Ideation Platform — Node/Express/MySQL backend (migration of the PHP api/*.php layer)",
+  "description": "IFQM Ideation Platform \u2014 Node/Express/MySQL backend (migration of the PHP api/*.php layer)",
   "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "setup": "node scripts/setup.js",
+    "test": "node --test --test-force-exit test/api.test.js",
+    "migrate": "node scripts/migrate.js",
+    "backup": "node scripts/backup.js"
   },
   "engines": {
     "node": ">=18"
