@@ -81,7 +81,21 @@ export async function updateSettings(db, body) {
   let updated = 0;
   for (const [key, rawValue] of Object.entries(body)) {
     if (!SETTINGS_WHITELIST.includes(key)) continue;               // skip unknown keys
-    if (key === 'smtp_pass' && rawValue === SMTP_PASS_MASK) continue; // keep existing password
+
+    /*
+     * smtp_pass is written only when the admin actually typed one.
+     *
+     * This used to skip ONLY the exact mask string, which missed the case that
+     * happened on every save: the form's password field is empty unless touched
+     * (AdminPage renders it with a placeholder and no value), so saving ANY
+     * unrelated setting — an SLA day, a feature flag — sent smtp_pass:'' and
+     * wiped the organisation's mail password. Outgoing email then failed
+     * silently, with nothing on screen suggesting the save had touched SMTP.
+     *
+     * Empty now means "leave it alone", which is the only thing an untouched
+     * field can honestly mean. Changing the password means typing a new one.
+     */
+    if (key === 'smtp_pass' && (!String(rawValue ?? '').trim() || rawValue === SMTP_PASS_MASK)) continue;
 
     let value = rawValue;
     if (key === 'approval_mode' && !['default', 'custom'].includes(value)) continue; // reject invalid mode

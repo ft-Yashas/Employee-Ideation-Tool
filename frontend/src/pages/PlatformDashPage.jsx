@@ -3,128 +3,278 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
-import { platformApi } from '../services/api';
+import { platformApi, saveBlob } from '../services/api';
+
+/*
+ * Platform → Organizations (tenant management).
+ *
+ * Everything here is the outer shell of a tenant: counts, status, and the org's
+ * own admin as a support contact. No employee, idea or file from inside a tenant
+ * reaches this screen — the API will not serve them. See the privacy contract in
+ * backend/src/services/platformService.js.
+ */
+const STATUS_STYLE = {
+  active:    { background:'var(--success-light)', color:'var(--success)' },
+  suspended: { background:'var(--danger-light)',  color:'var(--danger)' },
+  pending:   { background:'var(--warning-light)', color:'var(--warning)' },
+};
+
+const KPI_ICONS = {
+  orgs:      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>,
+  active:    <><circle cx="12" cy="12" r="9"/><polyline points="8 12 11 15 16 9"/></>,
+  suspended: <><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></>,
+  users:     <><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></>,
+  ideas:     <path d="M9 21h6M12 3a6 6 0 016 6c0 2.2-1.1 3.8-2.5 5L15 16H9l-.5-2C7 12.8 6 11.2 6 9a6 6 0 016-6z"/>,
+};
 
 export default function PlatformDashPage() {
   const { user }      = useAuth();
   const { t }         = useLang();
   const { showToast } = useToast();
   const navigate      = useNavigate();
+
   const [tenants, setTenants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [search,  setSearch]  = useState('');
+  const [status,  setStatus]  = useState('');
+  const [menuFor, setMenuFor] = useState(null);
+  const [busy,    setBusy]    = useState(false);
 
   useEffect(() => { load(); }, []);
 
+  // Close the row action menu on any outside click.
+  useEffect(() => {
+    if (menuFor === null) return undefined;
+    const close = (e) => { if (!e.target.closest('[data-row-menu]')) setMenuFor(null); };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [menuFor]);
+
   async function load() {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const res = await platformApi.tenants();
       if (res.data.success) setTenants(res.data.tenants || []);
       else setError(res.data.error || t('msg.fail_load'));
-    } catch { setError(t('msg.fail_load')); }
+    } catch (err) { setError(err?.response?.data?.error || t('msg.fail_load')); }
     setLoading(false);
   }
 
-  const totalUsers = tenants.reduce((s, t) => s + (t.user_count||0), 0);
-  const totalIdeas = tenants.reduce((s, t) => s + (t.idea_count||0), 0);
+  async function toggleStatus(ten) {
+    setBusy(true); setMenuFor(null);
+    const next = ten.status === 'active' ? 'suspended' : 'active';
+    try {
+      const res = await platformApi.updateTenant(ten.id, { status: next });
+      if (res.data.success) {
+        showToast(next === 'suspended' ? t('pa.suspended_ok') : t('pa.activated_ok'), 'success');
+        await load();
+      } else showToast(res.data.error || t('msg.server_error'), 'danger');
+    } catch (err) {
+      showToast(err?.response?.data?.error || t('msg.network_error'), 'danger');
+    }
+    setBusy(false);
+  }
+
+  const filtered = tenants.filter((ten) => {
+    const q = search.trim().toLowerCase();
+    const matchQ = !q || [ten.name, ten.slug, ten.admin_email, ten.admin_name]
+      .some((v) => String(v || '').toLowerCase().includes(q));
+    return matchQ && (!status || ten.status === status);
+  });
+
+  const counts = {
+    total:     tenants.length,
+    active:    tenants.filter((x) => x.status === 'active').length,
+    suspended: tenants.filter((x) => x.status === 'suspended').length,
+    users:     tenants.reduce((s, x) => s + (x.user_count || 0), 0),
+    ideas:     tenants.reduce((s, x) => s + (x.idea_count || 0), 0),
+  };
+
+  /* Client-side CSV: this data is already in the browser, so exporting it needs
+   * no endpoint. Values are quoted and internal quotes doubled — an org named
+   * O"Brien, Inc. would otherwise split into extra columns. */
+  function exportCsv() {
+    const cols = ['name', 'slug', 'status', 'admin_name', 'admin_email', 'user_count', 'idea_count', 'implemented_count', 'last_activity'];
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [cols.join(','), ...filtered.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\r\n');
+    saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'ifqm-organisations.csv');
+  }
+
+  const kpis = [
+    ['orgs',      t('pa.kpi_total_orgs'), counts.total,     'var(--primary)', 'var(--primary-light)'],
+    ['active',    t('pa.kpi_active'),     counts.active,    'var(--success)', 'var(--success-light)'],
+    ['suspended', t('pa.kpi_suspended'),  counts.suspended, 'var(--danger)',  'var(--danger-light)'],
+    ['users',     t('pa.total_users'),    counts.users,     'var(--info)',    'var(--info-light)'],
+    ['ideas',     t('pa.ideas_submitted'), counts.ideas,    'var(--warning)', 'var(--warning-light)'],
+  ];
 
   return (
     <>
-      {/* Console banner — restored from the PHP design */}
-      <div style={{ background:'linear-gradient(145deg,#1e1b4b 0%,#312e81 50%,#4338ca 100%)',borderRadius:'var(--r-xl, 14px)',padding:'26px 30px',marginBottom:22,display:'flex',justifyContent:'space-between',alignItems:'center',gap:16,flexWrap:'wrap',boxShadow:'var(--shadow-lg)' }}>
+      <div style={{ display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:16,flexWrap:'wrap',marginBottom:20 }}>
         <div>
-          <div style={{ fontSize:10,textTransform:'uppercase',letterSpacing:2,color:'rgba(255,255,255,.5)',fontWeight:700,marginBottom:6 }}>IFQM · Platform Admin Console</div>
-          <div style={{ fontSize:22,fontWeight:800,color:'#fff',letterSpacing:-.5,lineHeight:1.15 }}>{t('pa.overview')}</div>
-          <div style={{ fontSize:12,color:'rgba(255,255,255,.55)',marginTop:5 }}>{t('pa.private')}</div>
+          <h1 style={{ fontSize:26,fontWeight:800,color:'var(--heading)',margin:0,letterSpacing:'-.5px' }}>
+            {t('pa.tenant_mgmt')}
+          </h1>
+          <div style={{ fontSize:13,color:'var(--subtle)',marginTop:4 }}>{t('pa.tenant_mgmt_sub')}</div>
         </div>
-        <div style={{ background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.18)',borderRadius:'var(--r)',padding:'8px 18px',textAlign:'right' }}>
-          <div style={{ fontSize:10,color:'rgba(255,255,255,.5)',textTransform:'uppercase',letterSpacing:.8,marginBottom:2 }}>{t('pa.signed_in')}</div>
-          <div style={{ fontSize:13,fontWeight:700,color:'#fff' }} id="pa-name">{user?.name || '—'}</div>
+        <div style={{ textAlign:'right',fontSize:11,color:'var(--subtle)' }}>
+          <div style={{ textTransform:'uppercase',letterSpacing:.8 }}>{t('pa.signed_in')}</div>
+          <div style={{ fontSize:13,fontWeight:700,color:'var(--heading)' }} id="pa-name">{user?.name || '—'}</div>
         </div>
       </div>
 
-      {/* KPI Strip */}
+      {/* KPI strip */}
       <div className="kpi-grid" id="pa-kpi-strip">
-        <div className="kpi-card" style={{ borderLeftColor:'#1f2937' }}>
-          <div className="kpi-icon" style={{ background:'var(--primary-light)',color:'var(--primary)' }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
-            </svg>
+        {kpis.map(([icon, label, val, color, bg]) => (
+          <div key={label} className="kpi-card" style={{ borderLeftColor:color }}>
+            <div className="kpi-icon" style={{ background:bg, color }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
+                {KPI_ICONS[icon]}
+              </svg>
+            </div>
+            <div className="kpi-body">
+              <div className="kpi-val" style={{ color }}>{val}</div>
+              <div className="kpi-label">{label}</div>
+            </div>
           </div>
-          <div className="kpi-body">
-            <div className="kpi-val">{tenants.length}</div>
-            <div className="kpi-label">{t('pa.active_tenants')}</div>
-          </div>
-        </div>
-        <div className="kpi-card" style={{ borderLeftColor:'#10b981' }}>
-          <div className="kpi-icon" style={{ background:'var(--success-light)',color:'var(--success)' }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
-              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
-            </svg>
-          </div>
-          <div className="kpi-body">
-            <div className="kpi-val">{totalUsers}</div>
-            <div className="kpi-label">{t('pa.total_users')}</div>
-          </div>
-        </div>
-        <div className="kpi-card" style={{ borderLeftColor:'#f59e0b' }}>
-          <div className="kpi-icon" style={{ background:'var(--warning-light)',color:'var(--warning)' }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
-              <path d="M9 21h6M12 3a6 6 0 016 6c0 2.2-1.1 3.8-2.5 5L15 16H9l-.5-2C7 12.8 6 11.2 6 9a6 6 0 016-6z"/>
-            </svg>
-          </div>
-          <div className="kpi-body">
-            <div className="kpi-val">{totalIdeas}</div>
-            <div className="kpi-label">{t('pa.ideas_submitted')}</div>
-          </div>
-        </div>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div className="card" style={{ marginTop:18,display:'flex',gap:10,alignItems:'center',flexWrap:'wrap' }}>
+        <input
+          className="form-control"
+          style={{ flex:'1 1 240px',minWidth:200 }}
+          placeholder={t('pa.search_ph')}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select className="form-control" style={{ width:170 }} value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="">{t('pa.all_status')}</option>
+          <option value="active">{t('pa.status_active')}</option>
+          <option value="suspended">{t('pa.status_suspended')}</option>
+          <option value="pending">{t('pa.status_pending')}</option>
+        </select>
+        <button className="btn btn-outline" onClick={exportCsv} disabled={!filtered.length}>{t('pa.export_csv')}</button>
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>{t('pa.new_org')}</button>
       </div>
 
       {loading && <div className="empty-state"><div className="spinner"></div></div>}
       {error   && <div className="alert alert-danger">{error}</div>}
 
-      <div className="card" id="pa-tenant-list" style={{ marginTop:20 }}>
-        <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14 }}>
-          <div className="card-title" style={{ margin:0 }}>{t('pa.all_tenants')}</div>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>{t('pa.new_org')}</button>
-        </div>
-        {!loading && !error && !tenants.length && (
-          <div className="empty-state">{t('pa.no_tenants')}</div>
-        )}
-        {tenants.map(ten => {
-          const implPct = ten.idea_count > 0 ? Math.round(ten.implemented_count / ten.idea_count * 100) : 0;
-          const lastAct = ten.last_activity ? new Date(ten.last_activity).toLocaleDateString() : t('pa.no_activity');
-          return (
-            <div key={ten.id} style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 0',borderBottom:'1px solid var(--border)' }}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:14,fontWeight:700,color:'var(--heading)' }}>{ten.name}</div>
-                <div style={{ fontSize:12,color:'var(--subtle)',marginTop:2 }}>{ten.domain} · /{ten.slug}</div>
-                <div style={{ fontSize:11,color:'var(--label)',marginTop:4,display:'flex',alignItems:'center' }}>
-                  <span style={{ display:'inline-block',width:8,height:8,borderRadius:'50%',background:ten.db_error?'#ef4444':'#10b981',marginRight:6 }}></span>
-                  {ten.db_error ? t('platform.db_error') : t('platform.active')}
-                </div>
-              </div>
-              <div style={{ display:'flex',gap:24,textAlign:'center' }}>
-                <div><div style={{ fontSize:18,fontWeight:800,color:'var(--heading)' }}>{ten.user_count||0}</div><div style={{ fontSize:11,color:'var(--subtle)' }}>{t('platform.users')}</div></div>
-                <div><div style={{ fontSize:18,fontWeight:800,color:'var(--heading)' }}>{ten.idea_count||0}</div><div style={{ fontSize:11,color:'var(--subtle)' }}>{t('platform.ideas')}</div></div>
-                <div><div style={{ fontSize:18,fontWeight:800,color:'#4b5563' }}>{implPct}%</div><div style={{ fontSize:11,color:'var(--subtle)' }}>{t('platform.implemented')}</div></div>
-                <div><div style={{ fontSize:12,color:'var(--subtext)',fontWeight:500 }}>{lastAct}</div><div style={{ fontSize:11,color:'var(--subtle)' }}>{t('platform.last_activity')}</div></div>
-                <div>
-                  <button className="btn btn-outline btn-sm" onClick={() => navigate(`/platform/tenants/${ten.id}?name=${encodeURIComponent(ten.name)}`)}>
-                    {t('platform.view_org')}
-                  </button>
-                </div>
-              </div>
+      {!loading && !error && (
+        <div className="card" id="pa-tenant-list" style={{ marginTop:18,overflowX:'auto' }}>
+          <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12 }}>
+            <div className="card-title" style={{ margin:0 }}>{t('pa.registered_orgs')}</div>
+            <div style={{ fontSize:12,color:'var(--subtle)' }}>
+              {t('pa.org_count', { n: filtered.length })}
             </div>
-          );
-        })}
-      </div>
+          </div>
+
+          {!filtered.length ? (
+            <div className="empty-state">{tenants.length ? t('pa.no_match') : t('pa.no_tenants')}</div>
+          ) : (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{t('pa.col_company')}</th>
+                  <th>{t('pa.col_admin')}</th>
+                  <th>{t('pa.col_users')}</th>
+                  <th>{t('pa.col_ideas')}</th>
+                  <th>{t('table.status')}</th>
+                  <th>{t('platform.last_activity')}</th>
+                  <th style={{ textAlign:'right' }}>{t('pa.col_actions')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((ten) => (
+                  <tr key={ten.id}>
+                    <td>
+                      <div style={{ fontWeight:700,color:'var(--heading)' }}>{ten.name}</div>
+                      <div style={{ fontSize:11,color:'var(--subtle)',textTransform:'uppercase',letterSpacing:.5 }}>
+                        {ten.slug}{ten.is_default ? ` · ${t('pa.default_org')}` : ''}
+                      </div>
+                    </td>
+                    <td>
+                      {ten.admin_name
+                        ? <>
+                            <div style={{ fontSize:13 }}>{ten.admin_name}</div>
+                            <div style={{ fontSize:11,color:'var(--subtle)' }}>{ten.admin_email}</div>
+                          </>
+                        : <span style={{ color:'var(--subtle)' }}>—</span>}
+                    </td>
+                    <td style={{ fontWeight:700 }}>{ten.user_count ?? 0}</td>
+                    <td style={{ fontWeight:700 }}>{ten.idea_count ?? 0}</td>
+                    <td>
+                      <span style={{ ...(STATUS_STYLE[ten.status] || {}),fontSize:10,padding:'3px 10px',borderRadius:20,fontWeight:700,textTransform:'uppercase' }}>
+                        {ten.status}
+                      </span>
+                      {ten.db_error && (
+                        <div style={{ fontSize:10,color:'var(--danger)',marginTop:3 }}>{t('platform.db_error')}</div>
+                      )}
+                    </td>
+                    <td style={{ fontSize:12,color:'var(--subtext)' }}>
+                      {ten.last_activity ? new Date(ten.last_activity).toLocaleDateString() : t('pa.no_activity')}
+                    </td>
+                    <td style={{ textAlign:'right',position:'relative' }} data-row-menu>
+                      <button
+                        className="btn btn-outline btn-sm"
+                        disabled={busy}
+                        onClick={() => setMenuFor(menuFor === ten.id ? null : ten.id)}
+                        aria-label={t('pa.col_actions')}
+                      >⋮</button>
+                      {menuFor === ten.id && (
+                        <div style={{
+                          position:'absolute',right:0,top:'100%',zIndex:20,minWidth:190,textAlign:'left',
+                          background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--r)',
+                          boxShadow:'var(--shadow-lg)',padding:6,
+                        }}>
+                          <MenuItem onClick={() => navigate(`/platform/tenants/${ten.id}?name=${encodeURIComponent(ten.name)}`)}>
+                            {t('pa.action_view')}
+                          </MenuItem>
+                          <MenuItem onClick={() => toggleStatus(ten)} disabled={ten.is_default && ten.status === 'active'}>
+                            {ten.status === 'active' ? t('pa.suspend') : t('pa.activate')}
+                          </MenuItem>
+                          {/* Reset and delete both need confirmation, so they live
+                              on the detail page rather than one click deep here. */}
+                          <MenuItem onClick={() => navigate(`/platform/tenants/${ten.id}?name=${encodeURIComponent(ten.name)}`)}>
+                            {t('pa.action_manage')}
+                          </MenuItem>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      <div style={{ fontSize:11,color:'var(--subtle)',marginTop:14,lineHeight:1.6 }}>{t('pa.privacy_note')}</div>
 
       {showCreate && <CreateOrgModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); showToast(t('pa.created'),'success'); }} t={t} />}
     </>
+  );
+}
+
+function MenuItem({ children, onClick, disabled }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display:'block',width:'100%',textAlign:'left',padding:'8px 10px',fontSize:13,
+        background:'none',border:'none',borderRadius:6,cursor:disabled ? 'not-allowed' : 'pointer',
+        color:disabled ? 'var(--subtle)' : 'var(--text)',
+      }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--bg)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+    >
+      {children}
+    </button>
   );
 }
 

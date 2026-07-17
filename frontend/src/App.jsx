@@ -22,6 +22,9 @@ import SuperAdminPage from './pages/SuperAdminPage';
 import ProfilePage from './pages/ProfilePage';
 import PlatformDashPage from './pages/PlatformDashPage';
 import PlatformTenantsPage from './pages/PlatformTenantsPage';
+import PlatformTicketsPage from './pages/PlatformTicketsPage';
+import PlatformSettingsPage from './pages/PlatformSettingsPage';
+import SupportPage from './pages/SupportPage';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -86,7 +89,10 @@ function AppRoutes() {
       <Route path="/admin"           element={<PrivateRoute><AppShell><AdminPage /></AppShell></PrivateRoute>} />
       <Route path="/super-admin"     element={<PrivateRoute><AppShell><SuperAdminPage /></AppShell></PrivateRoute>} />
       <Route path="/profile"         element={<PrivateRoute><AppShell><ProfilePage /></AppShell></PrivateRoute>} />
+      <Route path="/support"         element={<PrivateRoute><AppShell><SupportPage /></AppShell></PrivateRoute>} />
       <Route path="/platform"        element={<PrivateRoute><AppShell><PlatformDashPage /></AppShell></PrivateRoute>} />
+      <Route path="/platform/tickets" element={<PrivateRoute><AppShell><PlatformTicketsPage /></AppShell></PrivateRoute>} />
+      <Route path="/platform/settings" element={<PrivateRoute><AppShell><PlatformSettingsPage /></AppShell></PrivateRoute>} />
       <Route path="/platform/tenants/:id" element={<PrivateRoute><AppShell><PlatformTenantsPage /></AppShell></PrivateRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

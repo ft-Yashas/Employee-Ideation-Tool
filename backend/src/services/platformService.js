@@ -3,12 +3,31 @@
  * Operates on the master registry (ifqm_master) and reads per-tenant aggregate
  * stats. Guarded by requirePlatformAuth.
  *
- * Privacy contract (preserved): platform admins see aggregate counts, trends,
- * and user directory/hierarchy only — never idea titles, content, or scores.
+ * ── PRIVACY CONTRACT ────────────────────────────────────────────────────────
+ * A platform admin is the VENDOR, not a member of the customer's organisation.
+ * They may see the outer shell of a tenant and nothing else:
+ *
+ *   ALLOWED   tenant name/slug/status, the org's own admin contacts (IFQM
+ *             provisions those accounts and needs someone to talk to), how many
+ *             users exist, the spread of roles, aggregate idea counts/trends.
+ *
+ *   FORBIDDEN any individual employee (name, email, employee_id, department,
+ *             location, points, manager), any idea title/content/score, any
+ *             uploaded file — anything happening INSIDE the tenant's tool.
+ *
+ * This is deliberately narrower than it once was. tenantDetail() used to return
+ * every employee's name, email, employee_id, department, location and points,
+ * and tenantHierarchy() returned the entire org chart with per-person idea
+ * counts — i.e. the vendor could read any customer's full staff directory. The
+ * old docblock even described that as the privacy contract ("user directory /
+ * hierarchy only"). Aggregates are computed with COUNT/GROUP BY in SQL so the
+ * rows never leave the tenant's database in the first place.
+ *
  * Tenant DB credentials are stripped (safeTenant) before responding.
  */
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
@@ -17,6 +36,7 @@ import { masterDb } from '../database/master.js';
 import { getTenantPool } from '../database/tenant.js';
 import { badRequest, notFound, ApiError } from '../utils/respond.js';
 import { assertPasswordStrength } from './authService.js';
+import { defaultsForNewTenant } from './platformSettingsService.js';
 import logger from '../utils/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,7 +61,10 @@ export async function tenants() {
 
   const out = [];
   for (const t of rows) {
-    const stats = { user_count: 0, idea_count: 0, implemented_count: 0, last_activity: null, trend: [] };
+    const stats = {
+      user_count: 0, idea_count: 0, implemented_count: 0, last_activity: null,
+      trend: [], admin_name: null, admin_email: null,
+    };
     try {
       const db = getTenantPool(t);
       const [[uc]] = await db.query("SELECT COUNT(*) AS c FROM users WHERE role != 'super_admin'");
@@ -53,11 +76,20 @@ export async function tenants() {
          FROM ideas WHERE submitted_at IS NOT NULL AND status != 'Draft'
          GROUP BY month ORDER BY month DESC LIMIT 6`
       );
+      // The org's primary admin — the vendor's support contact, and the only
+      // individual this endpoint may name. Ordinary employees are never listed.
+      const [[admin] = []] = await db.query(
+        `SELECT name, email FROM users
+          WHERE role IN ('admin','super_admin') AND status = 'active'
+          ORDER BY ${ROLE_ORDER.replace(/u\./g, '')}, id LIMIT 1`
+      );
       stats.user_count = Number(uc.c);
       stats.idea_count = Number(ic.c);
       stats.implemented_count = Number(imp.c);
       stats.last_activity = la.last ?? null;
       stats.trend = trend;
+      stats.admin_name = admin?.name ?? null;
+      stats.admin_email = admin?.email ?? null;
     } catch (e) {
       logger.warn(`tenant DB unavailable for ${t.slug}`, e.message);
       stats.db_error = true;
@@ -68,74 +100,80 @@ export async function tenants() {
   return { success: true, tenants: out };
 }
 
-// ── GET tenant hierarchy (user tree, no idea content) ──────────────
-export async function tenantHierarchy(tenantId) {
+/** Look up a tenant registry row, or 404. */
+async function requireTenantRow(tenantId, { activeOnly = false } = {}) {
   tenantId = Number(tenantId) || 0;
   if (!tenantId) throw badRequest('Missing tenant id.');
 
-  const master = masterDb();
-  const [rows] = await master.execute("SELECT * FROM tenants WHERE id = ? AND status = 'active' LIMIT 1", [tenantId]);
-  const t = rows[0];
-  if (!t) throw notFound('Tenant not found.');
-
-  try {
-    const db = getTenantPool(t);
-    const [users] = await db.query(
-      `SELECT u.id, u.employee_id, u.name, u.department, u.business_unit,
-              u.location, u.role, u.manager_id,
-              m.name AS manager_name,
-              (SELECT COUNT(*) FROM ideas WHERE submitter_id = u.id AND status != 'Draft') AS idea_count
-       FROM users u
-       LEFT JOIN users m ON m.id = u.manager_id
-       WHERE u.role != 'super_admin'
-       ORDER BY ${ROLE_ORDER}, u.name`
-    );
-    return {
-      success: true,
-      tenant: { id: t.id, name: t.name, slug: t.slug, domain: t.domain },
-      users,
-    };
-  } catch (e) {
-    throw new ApiError(503, 'Tenant database is unavailable.');
-  }
+  const [rows] = await masterDb().execute(
+    activeOnly
+      ? "SELECT * FROM tenants WHERE id = ? AND status = 'active' LIMIT 1"
+      : 'SELECT * FROM tenants WHERE id = ? LIMIT 1',
+    [tenantId]
+  );
+  if (!rows[0]) throw notFound('Tenant not found.');
+  return rows[0];
 }
 
-// ── GET tenant detail (users + idea status counts) ─────────────────
+/**
+ * The privacy-safe shell of a tenant: counts and role spread, plus the org's own
+ * admin contacts. No employee rows ever cross this boundary — the GROUP BY runs
+ * inside the tenant's database and only the tallies come back.
+ */
+async function tenantShell(t) {
+  const db = getTenantPool(t);
+
+  const [[uc]] = await db.query("SELECT COUNT(*) AS c FROM users WHERE role != 'super_admin'");
+  const [roleRows] = await db.query(
+    `SELECT role, COUNT(*) AS cnt, SUM(status = 'active') AS active_cnt
+       FROM users WHERE role != 'super_admin'
+      GROUP BY role ORDER BY ${ROLE_ORDER.replace(/u\./g, '')}`
+  );
+  const [ideaStats] = await db.query(
+    "SELECT status, COUNT(*) AS cnt FROM ideas WHERE status != 'Draft' GROUP BY status"
+  );
+  // The org's admins are the exception to "no individual users": IFQM creates
+  // that account when provisioning and needs a contact for support and billing.
+  // It stops at name/email/status — no department, no points, no activity.
+  const [admins] = await db.query(
+    `SELECT name, email, role, status FROM users
+      WHERE role IN ('admin','super_admin') ORDER BY ${ROLE_ORDER.replace(/u\./g, '')}, name`
+  );
+
+  return {
+    user_count: Number(uc.c),
+    role_distribution: roleRows.map((r) => ({
+      role: r.role,
+      count: Number(r.cnt),
+      active_count: Number(r.active_cnt),
+    })),
+    idea_stats: ideaStats,
+    admins,
+  };
+}
+
+/**
+ * GET tenant detail — the outer layer only.
+ *
+ * Previously returned the tenant's entire employee directory. It now returns
+ * exactly what a vendor needs to support an account: who runs it, how big it is,
+ * what the role spread looks like, and aggregate idea counts.
+ */
 export async function tenantDetail(tenantId) {
-  tenantId = Number(tenantId) || 0;
-  if (!tenantId) throw badRequest('Missing tenant id.');
-
-  const master = masterDb();
-  const [rows] = await master.execute('SELECT * FROM tenants WHERE id = ? LIMIT 1', [tenantId]);
-  const t = rows[0];
-  if (!t) throw notFound('Tenant not found.');
-
+  const t = await requireTenantRow(tenantId);
   try {
-    const db = getTenantPool(t);
-    const [users] = await db.query(
-      `SELECT u.id, u.employee_id, u.name, u.email, u.department, u.business_unit,
-              u.location, u.role, u.status, u.points, u.manager_id, u.created_at,
-              m.name AS manager_name,
-              (SELECT COUNT(*) FROM ideas WHERE submitter_id=u.id AND status!='Draft') AS idea_count
-       FROM users u LEFT JOIN users m ON m.id=u.manager_id
-       ORDER BY ${ROLE_ORDER}, u.name`
-    );
-    const [ideaStats] = await db.query(
-      "SELECT status, COUNT(*) AS cnt FROM ideas WHERE status!='Draft' GROUP BY status"
-    );
-    return { success: true, tenant: safeTenant(t), users, idea_stats: ideaStats };
+    return { success: true, tenant: safeTenant(t), ...(await tenantShell(t)) };
   } catch (e) {
+    if (e instanceof ApiError) throw e;
     throw new ApiError(503, 'Tenant database is unavailable.');
   }
 }
 
 // ── POST create_tenant (provision a new organisation) ──────────────
-const APPROVAL_DEFAULTS = [
-  ['approval_mode', 'default'],
-  ['approval_reviewer_roles', 'team_lead,project_lead,manager,senior_manager'],
-  ['approval_final_approver_roles', 'executive,admin,super_admin'],
-  ['approval_threshold', '100'],
-];
+// What a new tenant starts with is no longer hardcoded here — it comes from
+// ifqm_master.platform_settings, editable from Platform → Settings. See
+// platformSettingsService.defaultsForNewTenant(), which falls back to the
+// original built-in list if that table is empty or unreachable.
 
 /** Split schema.sql into executable statements (mirrors the PHP explode(';')). */
 function splitSqlStatements(sql) {
@@ -194,9 +232,15 @@ export async function createTenant(body) {
       [adminEmpId, adminName, adminEmail, hash, initials]
     );
 
-    for (const [k, v] of APPROVAL_DEFAULTS) {
+    // VALUES(value), not value=value: tenant_schema.sql has already seeded
+    // org_settings with its own baseline, and the operator's platform defaults
+    // are the more specific intent, so they must win. The old code used the
+    // no-op form, which was harmless only because the hardcoded list it wrote
+    // was identical to the schema's — the moment these become editable, that
+    // form would silently ignore whatever the operator configured.
+    for (const [k, v] of await defaultsForNewTenant()) {
       await conn.execute(
-        'INSERT INTO org_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=value',
+        'INSERT INTO org_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=VALUES(value)',
         [k, v]
       );
     }
@@ -234,4 +278,157 @@ export async function createTenant(body) {
   }
 }
 
-export default { tenants, tenantHierarchy, tenantDetail, createTenant };
+// ── PATCH /tenants/:id — rename / re-slug / suspend ────────────────
+const TENANT_STATUSES = ['active', 'suspended', 'pending'];
+
+/**
+ * Suspending a tenant is not cosmetic: resolveTenant() only ever matches
+ * status='active', so a suspended org's users are refused at login and every
+ * authenticated request fails tenant resolution. That is the intended kill
+ * switch for non-payment or offboarding.
+ */
+export async function updateTenant(tenantId, body) {
+  const t = await requireTenantRow(tenantId);
+  const updates = [];
+  const params = [];
+
+  if (body.name !== undefined) {
+    const name = String(body.name).trim();
+    if (!name) throw badRequest('Organisation name cannot be empty.');
+    if (name.length > 100) throw badRequest('Organisation name must be 100 characters or fewer.');
+    updates.push('name = ?');
+    params.push(name);
+  }
+
+  if (body.slug !== undefined) {
+    const slug = String(body.slug).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    if (slug.length < 2 || slug.length > 30) throw badRequest('Org code must be 2–30 characters.');
+    if (slug !== t.slug) {
+      const [dup] = await masterDb().execute('SELECT id FROM tenants WHERE slug = ? AND id != ? LIMIT 1', [slug, tenantId]);
+      if (dup.length) throw new ApiError(409, 'Organisation code already in use.');
+      updates.push('slug = ?');
+      params.push(slug);
+    }
+  }
+
+  if (body.status !== undefined) {
+    const status = String(body.status);
+    if (!TENANT_STATUSES.includes(status)) throw badRequest('Invalid status.');
+    // The default tenant is the fallback every slug-less login lands on.
+    // Suspending it would lock out anyone who signs in without an org code.
+    if (status !== 'active' && t.is_default) {
+      throw badRequest('The default organisation cannot be suspended.');
+    }
+    updates.push('status = ?');
+    params.push(status);
+  }
+
+  if (!updates.length) throw badRequest('Nothing to update.');
+
+  params.push(tenantId);
+  await masterDb().execute(`UPDATE tenants SET ${updates.join(', ')} WHERE id = ?`, params);
+  logger.info(`platform: tenant ${t.slug} updated (${updates.join(', ')})`);
+
+  const [rows] = await masterDb().execute('SELECT * FROM tenants WHERE id = ? LIMIT 1', [tenantId]);
+  return { success: true, tenant: safeTenant(rows[0]) };
+}
+
+// ── POST /tenants/:id/reset-admin-password ─────────────────────────
+/**
+ * Issue a temporary password for a locked-out tenant admin.
+ *
+ * The vendor never learns the admin's real password (it is bcrypt-hashed and
+ * unrecoverable) — this mints a new random one, forces must_change_password, and
+ * returns it ONCE for the operator to hand over out of band. Setting
+ * password_changed_at also kills every session opened with the old password, so
+ * a compromised admin session is ended by the same action that recovers it.
+ */
+export async function resetTenantAdminPassword(tenantId, body) {
+  const t = await requireTenantRow(tenantId);
+  const email = String(body?.admin_email ?? '').trim().toLowerCase();
+  if (!email) throw badRequest('Admin email is required.');
+
+  try {
+    const db = getTenantPool(t);
+    const [rows] = await db.execute(
+      "SELECT id, email, role FROM users WHERE email = ? AND role IN ('admin','super_admin') LIMIT 1",
+      [email]
+    );
+    const admin = rows[0];
+    // Deliberately scoped to admins: this endpoint must not become a way for the
+    // vendor to take over an ordinary employee's account and read their ideas.
+    if (!admin) throw notFound('No admin account with that email in this organisation.');
+
+    const tempPassword = crypto.randomBytes(9).toString('base64url'); // 12 chars, meets the policy
+    await db.execute(
+      `UPDATE users
+          SET password_hash = ?, must_change_password = 1, password_changed_at = NOW()
+        WHERE id = ?`,
+      [bcrypt.hashSync(tempPassword, 12), admin.id]
+    );
+
+    logger.info(`platform: admin password reset for ${email} @ ${t.slug}`);
+    return {
+      success: true,
+      admin_email: admin.email,
+      temp_password: tempPassword,
+      note: 'Shown once. The admin must change it at next sign-in.',
+    };
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(503, 'Tenant database is unavailable.');
+  }
+}
+
+// ── DELETE /tenants/:id ────────────────────────────────────────────
+/**
+ * Remove an organisation.
+ *
+ * Irreversible, so it is gated on the caller echoing back the org code — an
+ * accidental click on the wrong row cannot delete a live customer. Dropping the
+ * database is opt-in and separate: the default detaches the tenant from the
+ * registry but leaves its data intact on disk, which is what you want when an
+ * account is being wound down but its data must be retained.
+ */
+export async function deleteTenant(tenantId, body) {
+  const t = await requireTenantRow(tenantId);
+
+  if (String(body?.confirm_slug ?? '') !== t.slug) {
+    throw badRequest(`Type the org code "${t.slug}" to confirm deletion.`);
+  }
+  if (t.is_default) throw badRequest('The default organisation cannot be deleted.');
+
+  const dropDatabase = body?.drop_database === true;
+  await masterDb().execute('DELETE FROM tenants WHERE id = ?', [tenantId]);
+
+  let databaseDropped = false;
+  if (dropDatabase) {
+    try {
+      // Identifier, so it cannot be a bound parameter — the name comes from our
+      // own registry and createTenant built it as 'ifqm_' + a sanitised slug,
+      // but re-check rather than trust the row.
+      if (!/^ifqm_[a-z0-9_]+$/.test(t.db_name)) {
+        throw new ApiError(400, `Refusing to drop unexpected database name "${t.db_name}".`);
+      }
+      await masterDb().query(`DROP DATABASE IF EXISTS \`${t.db_name}\``);
+      databaseDropped = true;
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      // The registry row is already gone; report honestly rather than pretend.
+      logger.error(`platform: tenant ${t.slug} unregistered but DROP DATABASE failed`, e);
+      return {
+        success: true,
+        deleted: t.slug,
+        database_dropped: false,
+        warning: `Organisation removed, but its database "${t.db_name}" could not be dropped. Remove it manually.`,
+      };
+    }
+  }
+
+  logger.info(`platform: tenant ${t.slug} deleted (database_dropped=${databaseDropped})`);
+  return { success: true, deleted: t.slug, database_dropped: databaseDropped };
+}
+
+export default {
+  tenants, tenantDetail, createTenant, updateTenant, resetTenantAdminPassword, deleteTenant,
+};

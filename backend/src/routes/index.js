@@ -17,6 +17,7 @@ import exportRoutes from './exportRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import uploadRoutes from './uploadRoutes.js';
 import brandingRoutes from './brandingRoutes.js';
+import supportRoutes from './supportRoutes.js';
 import platformRoutes from './platformRoutes.js';
 import { masterDb } from '../database/master.js';
 import logger from '../utils/logger.js';
@@ -54,6 +55,7 @@ router.use('/export', exportRoutes);
 router.use('/reports', reportRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/branding', brandingRoutes);
+router.use('/support', supportRoutes);
 router.use('/platform', platformRoutes);
 
 export default router;

@@ -277,9 +277,52 @@ export const brandingApi = {
 };
 
 // ── Platform (platform admin only) ───────────────────────────────
+// ── Support tickets (tenant side) ────────────────────────────────
+// Any signed-in user may raise one and follow their own; a tenant admin sees
+// every ticket raised in their org. IFQM's internal notes are stripped
+// server-side, so nothing here can reveal them.
+export const supportApi = {
+  list: (params) => api.get('/support/tickets', { params }),
+  create: (data) => api.post('/support/tickets', data),
+  get: (id) => api.get(`/support/tickets/${id}`),
+  reply: (id, body) => api.post(`/support/tickets/${id}/messages`, { body }),
+  close: (id) => api.patch(`/support/tickets/${id}`, { status: 'closed' }),
+};
+
+// tenantHierarchy is gone deliberately: it returned the tenant's full org chart
+// (employee names, managers, per-person idea counts) to IFQM staff. tenantDetail
+// now returns aggregates only — counts, role spread, and the org's admin
+// contacts. See the privacy contract at the top of platformService.js.
 export const platformApi = {
   tenants: () => api.get('/platform/tenants'),
-  tenantHierarchy: (id) => api.get(`/platform/tenants/${id}/hierarchy`),
   tenantDetail: (id) => api.get(`/platform/tenants/${id}`),
   createTenant: (data) => api.post('/platform/tenants', data),
+  updateTenant: (id, data) => api.patch(`/platform/tenants/${id}`, data),
+  resetTenantAdminPassword: (id, admin_email) =>
+    api.post(`/platform/tenants/${id}/reset-admin-password`, { admin_email }),
+  // confirm_slug must echo the org code; drop_database is opt-in.
+  deleteTenant: (id, data) => api.delete(`/platform/tenants/${id}`, { data }),
+
+  // Settings. Note there is no smtp_pass on the way in or out: the server never
+  // returns it (only smtp_pass_set), and only writes it when a non-empty value
+  // is sent — so an untouched field can never wipe a tenant's mail password.
+  getDefaults: () => api.get('/platform/settings/defaults'),
+  updateDefaults: (data) => api.put('/platform/settings/defaults', data),
+  tenantSettings: (id) => api.get(`/platform/tenants/${id}/settings`),
+  updateTenantSettings: (id, data) => api.put(`/platform/tenants/${id}/settings`, data),
+
+  admins: () => api.get('/platform/admins'),
+  createAdmin: (data) => api.post('/platform/admins', data),
+  deleteAdmin: (id) => api.delete(`/platform/admins/${id}`),
+  changeOwnPassword: (data) => api.post('/platform/admins/change-password', data),
+
+  health: () => api.get('/platform/health'),
+
+  // Support queue — every tenant's tickets, plus IFQM-only internal notes.
+  tickets: (params) => api.get('/platform/tickets', { params }),
+  ticket: (id) => api.get(`/platform/tickets/${id}`),
+  ticketReply: (id, body, is_internal = false) =>
+    api.post(`/platform/tickets/${id}/messages`, { body, is_internal }),
+  ticketUpdate: (id, data) => api.patch(`/platform/tickets/${id}`, data),
+  ticketCreate: (data) => api.post('/platform/tickets', data),
 };
