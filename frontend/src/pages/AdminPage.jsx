@@ -910,7 +910,7 @@ function UserFormModal({ user: editUser, managers, currentUserRole, currentUserI
       const res = await usersApi[isEdit ? 'updateUser' : 'createUser'](payload);
       if (res.data.success) { showToast(t(isEdit ? 'admin.user_updated' : 'admin.user_created'),'success'); onSaved(); }
       else { setError(res.data.error||t('admin.user_save_failed')); }
-    } catch { setError(t('msg.server_error')); }
+    } catch (err) { setError(err.response?.data?.error || t('msg.server_error')); }
     setSaving(false);
   }
 
