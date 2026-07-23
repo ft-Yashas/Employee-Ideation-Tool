@@ -151,6 +151,32 @@ export default function IdeaDetailModal({ ideaId, onClose }) {
                     <div style={{ marginTop:8 }}><strong>{t('detail.co_suggesters')}:</strong> {idea.co1_name}{idea.co2_name?', '+idea.co2_name:''}</div>
                   )}
 
+                  {/* Business case. Ideas submitted before these fields existed
+                      have none of them, so the whole panel stays out of the way
+                      rather than rendering five empty rows. */}
+                  {(() => {
+                    const bc = [
+                      [t('form.investment'),  idea.investment_required],
+                      [t('form.feasibility'), idea.feasibility ? translateImpact(idea.feasibility, t) : ''],
+                      [t('form.impl_time'),   [idea.implementation_duration,
+                                               idea.expected_implementation_date ? fmtDate(idea.expected_implementation_date) : '']
+                                              .filter(Boolean).join(' · ')],
+                      [t('form.benefits'),    idea.benefits_expected],
+                      [t('form.support'),     idea.support_required],
+                    ].filter(([, v]) => v);
+                    if (!bc.length) return null;
+                    return (
+                      <div className="ai-panel" style={{ marginTop:14,borderLeftColor:'#0891b2' }}>
+                        <div className="ai-panel-title" style={{ color:'#0e7490' }}>{t('detail.business_case')}</div>
+                        {bc.map(([label, v]) => (
+                          <div key={label} style={{ marginTop:6,fontSize:13,lineHeight:1.5 }}>
+                            <strong>{label}:</strong> {v}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
                   {/* AI Panel */}
                   <div className="ai-panel" style={{ marginTop:14 }}>
                     <div className="ai-panel-title">{t('detail.ai_eval')}</div>

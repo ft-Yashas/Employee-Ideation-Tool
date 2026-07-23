@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useBranding } from '../context/BrandingContext';
 import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
-import { usersApi, ideasApi, settingsApi, scoreApi, brandingApi } from '../services/api';
+import { usersApi, ideasApi, settingsApi, scoreApi, brandingApi, categoriesApi } from '../services/api';
 import { formatRole, statusBadge, translateStatus, fmtDate } from '../utils/helpers';
 import IdeaDetailModal from '../components/IdeaDetailModal';
 import BulkImportModal from '../components/BulkImportModal';
@@ -27,7 +27,7 @@ const ROLE_BADGE_STYLE = {
   trainee:        { background:'var(--success-light)', color:'var(--success)', border:'1px solid var(--success-dim)' },
 };
 
-const TAB_KEYS = ['admin.tab_overview','admin.tab_ideas','admin.tab_users','admin.tab_hierarchy','admin.tab_system'];
+const TAB_KEYS = ['admin.tab_overview','admin.tab_ideas','admin.tab_users','admin.tab_hierarchy','admin.tab_categories','admin.tab_system'];
 
 export default function AdminPage() {
   const { user }      = useAuth();
@@ -56,7 +56,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (tab === 0) loadDash();
     if (tab === 1) loadIdeas();
-    if (tab === 4) loadSettings();
+    if (tab === 5) loadSettings();
   }, [tab]);
 
   // The user list is searched and paged on the SERVER — a tenant can hold
@@ -329,10 +329,13 @@ export default function AdminPage() {
       {/* Hierarchy — approval workflow + reporting structure */}
       {tab === 3 && <HierarchyTab t={t} showToast={showToast} currentUserId={user?.id} />}
 
-      {/* System */}
-      {tab === 4 && <BrandingCard t={t} showToast={showToast} />}
+      {/* Idea categories */}
+      {tab === 4 && <CategoriesTab t={t} showToast={showToast} />}
 
-      {tab === 4 && settings && (
+      {/* System */}
+      {tab === 5 && <BrandingCard t={t} showToast={showToast} />}
+
+      {tab === 5 && settings && (
         <div style={{ maxWidth:600,marginTop:16 }}>
           <form onSubmit={handleSaveSettings}>
             <div style={{ fontSize:13,fontWeight:600,color:'var(--heading)',marginBottom:16 }}>{t('admin.sla_heading')}</div>
@@ -597,6 +600,108 @@ function BrandingCard({ t, showToast }) {
 }
 
 /*
+ * ── Idea categories tab ────────────────────────────────────────────
+ * The list the submission wizard offers, owned by this organisation alone. The
+ * server resolves the tenant from the caller's token, so an admin editing this
+ * screen cannot reach another organisation's categories.
+ *
+ * Deleting is presented as "stop offering this", because that is all it does:
+ * ideas already filed under a category keep it — the name is stored on the idea
+ * as text, not as a reference to this row. The usage count is shown next to
+ * every category so the decision is made with that in view.
+ */
+function CategoriesTab({ t, showToast }) {
+  const [cats,    setCats]    = useState([]);
+  const [name,    setName]    = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy,    setBusy]    = useState(false);
+  const [error,   setError]   = useState('');
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await categoriesApi.list();
+      setCats(res.data.categories || []);
+      setError('');
+    } catch { setError(t('msg.fail_load')); }
+    setLoading(false);
+  }
+
+  async function add(e) {
+    e.preventDefault();
+    const next = name.trim();
+    if (!next) return;
+    setBusy(true);
+    try {
+      const res = await categoriesApi.create(next);
+      if (res.data.success) {
+        setName('');
+        showToast(t('cat.added'), 'success');
+        await load();
+      } else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch (err) {
+      showToast(err.response?.data?.error || t('msg.server_error'), 'danger');
+    }
+    setBusy(false);
+  }
+
+  async function remove(cat) {
+    if (!confirm(t('cat.confirm_delete', { name: cat.name }))) return;
+    setBusy(true);
+    try {
+      const res = await categoriesApi.delete(cat.id);
+      if (res.data.success) {
+        showToast(t('cat.deleted'), 'info');
+        await load();
+      } else showToast(res.data.error || t('msg.error'), 'danger');
+    } catch (err) {
+      showToast(err.response?.data?.error || t('msg.server_error'), 'danger');
+    }
+    setBusy(false);
+  }
+
+  if (loading) return <div className="empty-state"><div className="spinner"></div></div>;
+
+  return (
+    <div className="card" style={{ maxWidth:640,marginTop:16 }}>
+      <div className="card-title">{t('cat.title')}</div>
+      <div style={{ fontSize:12,color:'var(--muted)',marginBottom:16,lineHeight:1.6 }}>{t('cat.desc')}</div>
+
+      {error && <div className="alert alert-danger" style={{ marginBottom:12 }}>{error}</div>}
+
+      <form onSubmit={add} style={{ display:'flex',gap:8,marginBottom:16,flexWrap:'wrap' }}>
+        <input className="form-control" style={{ flex:1,minWidth:200 }} value={name} maxLength={80}
+          placeholder={t('cat.name_ph')} onChange={e => setName(e.target.value)} />
+        <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>
+          + {t('cat.add')}
+        </button>
+      </form>
+
+      {!cats.length ? <div className="empty-state">{t('cat.empty')}</div> : (
+        <div style={{ display:'flex',flexDirection:'column',gap:8 }}>
+          {cats.map(c => (
+            <div key={c.id} style={{ display:'flex',alignItems:'center',gap:12,padding:'10px 14px',
+              background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--r)' }}>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ fontWeight:600,fontSize:13,color:'var(--text)' }}>{c.name}</div>
+                <div style={{ fontSize:11,color:'var(--subtle)',marginTop:2 }}>
+                  {Number(c.idea_count) > 0 ? t('cat.used_in', { n: c.idea_count }) : t('cat.unused')}
+                </div>
+              </div>
+              <button className="btn btn-sm" disabled={busy || cats.length <= 1}
+                style={{ background:'var(--danger-light)',color:'var(--danger)',border:'1px solid var(--danger-dim)' }}
+                onClick={() => remove(c)}>{t('btn.remove')}</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/*
  * ── Hierarchy tab ──────────────────────────────────────────────────
  * The tenant admin's control panel for the hierarchical idea-submission
  * system. Two independently owned pieces:
@@ -617,13 +722,30 @@ function BrandingCard({ t, showToast }) {
 const CHAIN_LADDER = ['team_lead','project_lead','manager','senior_manager','executive','admin','super_admin'];
 // PHP offered 4 reviewer / 3 final roles; the pool is widened so an org can
 // also make executives part of the chain or let senior managers close ideas.
-const REVIEWER_ROLE_OPTIONS = ['team_lead','project_lead','manager','senior_manager','executive'];
-const FINAL_ROLE_OPTIONS    = ['manager','senior_manager','executive','admin','super_admin'];
+const REVIEWER_ROLE_OPTIONS = ['team_lead','project_lead','manager','department_manager','senior_manager','plant_head','executive'];
+const FINAL_ROLE_OPTIONS    = ['manager','department_manager','senior_manager','plant_head','executive','admin','super_admin'];
 const DEFAULT_REVIEWERS = ['team_lead','project_lead','manager','senior_manager'];
 const DEFAULT_FINALS    = ['executive','admin','super_admin'];
 
+/*
+ * ── Approval stages ────────────────────────────────────────────────
+ * The chain as an organisation describes it to its own people: an ORDER of
+ * named steps, not two unordered sets of roles. Mirrors STAGE_CATALOG and
+ * DEFAULT_STAGES in backend/src/services/approvalStages.js — the server derives
+ * reviewer/final roles from this list, and validates every key it is sent, so
+ * this array is the menu rather than the authority.
+ *
+ * `originator` is the person who submits. It is pinned first and cannot be
+ * removed: an approval step cannot precede the idea existing.
+ */
+const STAGE_OPTIONS = [
+  'immediate_manager','department_manager','plant_head',
+  'team_lead','project_lead','senior_manager','executive',
+];
+const DEFAULT_STAGES = ['originator','immediate_manager','department_manager','plant_head'];
+
 const HIER_ROLE_COLORS = {
-  admin:'#374151', executive:'#4b5563', senior_manager:'#6b7280',
+  admin:'#374151', executive:'#4b5563', plant_head:'#52525b', senior_manager:'#6b7280', department_manager:'#d97706',
   manager:'#f59e0b', project_lead:'#0891b2', team_lead:'#0284c7',
   employee:'#10b981', trainee:'#64748b',
 };
@@ -643,6 +765,8 @@ function HierarchyTab({ t, showToast, currentUserId }) {
   const [revRoles,  setRevRoles]  = useState(DEFAULT_REVIEWERS);
   const [finRoles,  setFinRoles]  = useState(DEFAULT_FINALS);
   const [threshold, setThreshold] = useState(100);
+  const [stages,    setStages]    = useState(DEFAULT_STAGES);
+  const [addStage,  setAddStage]  = useState('');
   const [wfSaving,  setWfSaving]  = useState(false);
   const [wfMsg,     setWfMsg]     = useState(null); // { ok, text }
 
@@ -665,7 +789,7 @@ function HierarchyTab({ t, showToast, currentUserId }) {
       }
       setManagers(mgrRes.data.managers || []);
       const s = setRes.data.settings || {};
-      setMode(s.approval_mode === 'custom' ? 'custom' : 'default');
+      setMode(['custom','stages'].includes(s.approval_mode) ? s.approval_mode : 'default');
       const parse = (v, fb) => {
         const list = String(v || '').split(',').map(x => x.trim()).filter(Boolean);
         return list.length ? list : fb;
@@ -673,6 +797,11 @@ function HierarchyTab({ t, showToast, currentUserId }) {
       setRevRoles(parse(s.approval_reviewer_roles, DEFAULT_REVIEWERS));
       setFinRoles(parse(s.approval_final_approver_roles, DEFAULT_FINALS));
       setThreshold(Math.max(1, Math.min(100, parseInt(s.approval_threshold, 10) || 100)));
+      // Whatever is stored, the originator leads and never repeats — the same
+      // normalisation the server applies on read.
+      const stored = parse(s.approval_stages, DEFAULT_STAGES)
+        .filter(x => x === 'originator' || STAGE_OPTIONS.includes(x));
+      setStages(['originator', ...new Set(stored.filter(x => x !== 'originator'))]);
     } catch { setError(t('msg.fail_load')); }
     setLoading(false);
   }
@@ -681,9 +810,36 @@ function HierarchyTab({ t, showToast, currentUserId }) {
     setList(list.includes(role) ? list.filter(r => r !== role) : [...list, role]);
   }
 
+  // ── stage list editing ──
+  function removeStage(stage) {
+    if (stage === 'originator') return;   // pinned; the UI offers no button either
+    setStages(list => list.filter(s => s !== stage));
+  }
+
+  function appendStage(stage) {
+    if (!stage || stages.includes(stage)) return;
+    setStages(list => [...list, stage]);
+    setAddStage('');
+  }
+
+  /** Move an approver stage one place up or down. The originator never moves. */
+  function moveStage(index, delta) {
+    const target = index + delta;
+    if (index < 1 || target < 1 || target >= stages.length) return;
+    setStages(list => {
+      const next = [...list];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
   async function saveWorkflow() {
     if (mode === 'custom' && (!revRoles.length || !finRoles.length)) {
       setWfMsg({ ok:false, text: t('hier.roles_required') });
+      return;
+    }
+    if (mode === 'stages' && stages.filter(s => s !== 'originator').length === 0) {
+      setWfMsg({ ok:false, text: t('hier.stages_required') });
       return;
     }
     setWfSaving(true);
@@ -693,6 +849,7 @@ function HierarchyTab({ t, showToast, currentUserId }) {
         approval_mode: mode,
         approval_reviewer_roles: revRoles.join(','),
         approval_final_approver_roles: finRoles.join(','),
+        approval_stages: stages.join(','),
         approval_threshold: String(threshold),
       });
       if (res.data.success) { setWfMsg({ ok:true, text: t('hier.saved') }); showToast(t('hier.saved'),'success'); }
@@ -706,6 +863,7 @@ function HierarchyTab({ t, showToast, currentUserId }) {
     setMode('default');
     setRevRoles(DEFAULT_REVIEWERS);
     setFinRoles(DEFAULT_FINALS);
+    setStages(DEFAULT_STAGES);
     setThreshold(100);
     setWfMsg(null);
   }
@@ -733,10 +891,15 @@ function HierarchyTab({ t, showToast, currentUserId }) {
 
   // Chain preview: junior → senior among the selected reviewer roles.
   const orderedRev = CHAIN_LADDER.filter(r => revRoles.includes(r));
-  const chainPreview = mode === 'custom'
-    ? [t('role.employee'), ...orderedRev.map(r => formatRole(r, t))].join(' → ')
-      + ` → ${t('hier.final_short')}: ` + finRoles.map(r => formatRole(r, t)).join(' / ')
-    : `${t('role.employee')} → ${DEFAULT_REVIEWERS.map(r => formatRole(r, t)).join(' → ')} → ${t('hier.final_short')}: ${DEFAULT_FINALS.map(r => formatRole(r, t)).join(' / ')}`;
+  const approverStages = stages.filter(s => s !== 'originator');
+  const chainPreview =
+    mode === 'stages'
+      ? [t('stage.originator'), ...approverStages.map(s => t(`stage.${s}`))].join(' → ')
+        + (approverStages.length ? ` (${t('hier.stage_final')}: ${t(`stage.${approverStages[approverStages.length-1]}`)})` : '')
+    : mode === 'custom'
+      ? [t('role.employee'), ...orderedRev.map(r => formatRole(r, t))].join(' → ')
+        + ` → ${t('hier.final_short')}: ` + finRoles.map(r => formatRole(r, t)).join(' / ')
+      : `${t('role.employee')} → ${DEFAULT_REVIEWERS.map(r => formatRole(r, t)).join(' → ')} → ${t('hier.final_short')}: ${DEFAULT_FINALS.map(r => formatRole(r, t)).join(' / ')}`;
 
   // Build the reporting tree.
   const byId = {};
@@ -772,12 +935,78 @@ function HierarchyTab({ t, showToast, currentUserId }) {
               {t('hier.mode_default')}
             </label>
             <label style={{ display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13 }}>
+              <input type="radio" name="approval_mode" value="stages" checked={mode==='stages'} onChange={() => setMode('stages')} />
+              {t('hier.mode_stages')}
+            </label>
+            <label style={{ display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13 }}>
               <input type="radio" name="approval_mode" value="custom" checked={mode==='custom'} onChange={() => setMode('custom')} />
               {t('hier.mode_custom')}
             </label>
           </div>
           <div style={{ fontSize:11,color:'var(--subtle)',marginTop:4 }}>{t('hier.default_hint')}</div>
         </div>
+
+        {/* Stage editor — add, remove and reorder the steps an idea travels
+            through. The originator is pinned at the top with no remove button:
+            it is the submission itself, not an approval. */}
+        {mode === 'stages' && (
+          <div style={{ borderLeft:'2px solid var(--primary)',paddingLeft:14,marginBottom:14 }}>
+            <label style={{ fontWeight:500,marginBottom:6,display:'block' }}>{t('hier.stages_label')}</label>
+            <div style={{ fontSize:11,color:'var(--subtle)',marginBottom:10 }}>{t('hier.stages_hint')}</div>
+
+            <div style={{ display:'flex',flexDirection:'column',gap:6,marginBottom:12 }}>
+              {stages.map((s, i) => {
+                const isOriginator = s === 'originator';
+                const isFinal = !isOriginator && i === stages.length - 1;
+                return (
+                  <div key={s} style={{ display:'flex',alignItems:'center',gap:10,padding:'8px 12px',
+                    background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--r)',
+                    borderLeft:`3px solid ${isOriginator ? '#10b981' : isFinal ? '#374151' : 'var(--primary)'}` }}>
+                    <span style={{ fontSize:11,color:'var(--subtle)',minWidth:16,textAlign:'right' }}>{i+1}</span>
+                    <div style={{ flex:1,minWidth:0 }}>
+                      <div style={{ fontSize:13,fontWeight:600,color:'var(--text)' }}>
+                        {t(`stage.${s}`)}
+                        {s === 'immediate_manager' && (
+                          <span style={{ fontWeight:400,fontSize:11,color:'var(--subtle)' }}> ({t('stage.immediate_manager_note')})</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize:11,color:'var(--subtle)',marginTop:2 }}>
+                        {isOriginator ? t('hier.stage_locked') : isFinal ? t('hier.stage_final') : ''}
+                      </div>
+                    </div>
+                    {!isOriginator && (
+                      <div style={{ display:'flex',gap:4 }}>
+                        <button type="button" className="btn btn-outline btn-sm" disabled={i <= 1}
+                          onClick={() => moveStage(i, -1)} aria-label="Move up">↑</button>
+                        <button type="button" className="btn btn-outline btn-sm" disabled={i >= stages.length - 1}
+                          onClick={() => moveStage(i, 1)} aria-label="Move down">↓</button>
+                        <button type="button" className="btn btn-sm"
+                          style={{ background:'var(--danger-light)',color:'var(--danger)',border:'1px solid var(--danger-dim)' }}
+                          onClick={() => removeStage(s)}>{t('btn.remove')}</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {STAGE_OPTIONS.some(s => !stages.includes(s)) ? (
+              <div style={{ display:'flex',gap:8,flexWrap:'wrap',alignItems:'center' }}>
+                <select className="form-control" style={{ width:230 }} value={addStage}
+                  onChange={e => setAddStage(e.target.value)}>
+                  <option value="">{t('hier.stage_add')}…</option>
+                  {STAGE_OPTIONS.filter(s => !stages.includes(s)).map(s => (
+                    <option key={s} value={s}>{t(`stage.${s}`)}</option>
+                  ))}
+                </select>
+                <button type="button" className="btn btn-outline btn-sm" disabled={!addStage}
+                  onClick={() => appendStage(addStage)}>+ {t('hier.stage_add')}</button>
+              </div>
+            ) : (
+              <div style={{ fontSize:11,color:'var(--subtle)' }}>{t('hier.stage_all_used')}</div>
+            )}
+          </div>
+        )}
 
         {mode === 'custom' && (
           <div style={{ borderLeft:'2px solid var(--primary)',paddingLeft:14,marginBottom:14 }}>

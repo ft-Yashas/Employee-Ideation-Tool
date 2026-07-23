@@ -16,7 +16,8 @@ import { assertPasswordStrength } from './authService.js';
 
 // Role sets used across create/update/managers (mirrors the PHP literals).
 const ROLES_ADMIN_CAN_ASSIGN = [
-  'trainee', 'employee', 'team_lead', 'project_lead', 'manager', 'senior_manager', 'executive',
+  'trainee', 'employee', 'team_lead', 'project_lead', 'manager', 'department_manager',
+  'senior_manager', 'plant_head', 'executive',
 ];
 const ROLES_SUPER_ADMIN_CAN_ASSIGN = [...ROLES_ADMIN_CAN_ASSIGN, 'admin'];
 
@@ -99,7 +100,7 @@ export async function adminUsers(db, { q = '', page = 1, limit = 50 } = {}) {
             m.name AS manager_name
        FROM users u LEFT JOIN users m ON m.id=u.manager_id
        ${whereSql}
-      ORDER BY FIELD(u.role,'admin','executive','senior_manager','manager','project_lead','team_lead','employee','trainee'), u.name
+      ORDER BY FIELD(u.role,'admin','executive','plant_head','senior_manager','department_manager','manager','project_lead','team_lead','employee','trainee'), u.name
       LIMIT ? OFFSET ?`,
     [...params, perPage, offset]
   );
@@ -271,8 +272,8 @@ export async function deleteUser(db, actor, id) {
 export async function managers(db) {
   const [rows] = await db.query(
     `SELECT id, name, department, role FROM users
-      WHERE role IN ('team_lead','project_lead','manager','senior_manager','executive','admin') AND status='active'
-      ORDER BY FIELD(role,'admin','executive','senior_manager','manager','project_lead','team_lead'), name`
+      WHERE role IN ('team_lead','project_lead','manager','department_manager','senior_manager','plant_head','executive','admin') AND status='active'
+      ORDER BY FIELD(role,'admin','executive','plant_head','senior_manager','department_manager','manager','project_lead','team_lead'), name`
   );
   return { success: true, managers: rows };
 }
@@ -316,7 +317,7 @@ export async function hierarchy(db) {
            FROM ideas WHERE status != 'Draft' GROUP BY submitter_id
        ) i ON i.submitter_id = u.id
       WHERE u.role != 'super_admin'
-      ORDER BY FIELD(u.role,'admin','executive','senior_manager','manager','project_lead','team_lead','employee','trainee'), u.name
+      ORDER BY FIELD(u.role,'admin','executive','plant_head','senior_manager','department_manager','manager','project_lead','team_lead','employee','trainee'), u.name
       LIMIT ?`,
     [HIERARCHY_MAX + 1]
   );

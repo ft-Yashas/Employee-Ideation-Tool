@@ -120,7 +120,7 @@ export function animateCounter(el, target, duration = 900) {
   requestAnimationFrame(step);
 }
 
-export const ROLE_PRIV = ['team_lead','project_lead','manager','senior_manager','executive','admin','super_admin'];
+export const ROLE_PRIV = ['team_lead','project_lead','manager','department_manager','senior_manager','plant_head','executive','admin','super_admin'];
 export function isPrivileged(role) { return ROLE_PRIV.includes(role); }
 export function isAdmin(role) { return role === 'admin'; }
 export function isSuperAdmin(role) { return role === 'super_admin'; }

@@ -10,7 +10,9 @@
  * Excel opens it correctly.
  */
 const INDIVIDUAL_ROLES = ['trainee', 'employee'];
-const TEAM_ROLES = ['team_lead', 'project_lead', 'manager', 'senior_manager'];
+// Kept in step with ideaService's list of the same name — an export must show
+// exactly what the screen it was launched from shows.
+const TEAM_ROLES = ['team_lead', 'project_lead', 'manager', 'department_manager', 'senior_manager'];
 
 // Role-based visibility clause (mirrors ideas.php list / export.php).
 function buildVisibilityClause(user, params) {
@@ -49,7 +51,9 @@ export async function ideasCsv(db, user, { status, search, impact } = {}) {
 
   const sql =
     `SELECT i.idea_code, i.title, i.status, u.name AS submitter_name, u.department,
-            i.impact_level, i.impact_areas, i.ai_score, i.submitted_at
+            i.impact_level, i.impact_areas, i.ai_score, i.submitted_at,
+            i.investment_required, i.feasibility, i.implementation_duration,
+            i.expected_implementation_date, i.benefits_expected, i.support_required
      FROM ideas i JOIN users u ON u.id = i.submitter_id` +
     (where.length ? ' WHERE ' + where.join(' AND ') : '') +
     ' ORDER BY i.submitted_at DESC LIMIT 10000';
@@ -57,9 +61,14 @@ export async function ideasCsv(db, user, { status, search, impact } = {}) {
   const [ideas] = await db.execute(sql, params);
 
   let csv = BOM;
-  csv += csvRow(['Idea Code', 'Title', 'Status', 'Submitter', 'Department', 'Impact Level', 'Impact Areas', 'AI Score', 'Submitted At']);
+  // The business-case columns trail the original nine, so any spreadsheet or
+  // script built against the old export keeps finding its columns where it left
+  // them.
+  csv += csvRow(['Idea Code', 'Title', 'Status', 'Submitter', 'Department', 'Impact Level', 'Categories', 'AI Score', 'Submitted At',
+    'Investment Required', 'Feasibility', 'Time to Implement', 'Expected Implementation Date', 'Benefits Expected', 'Support Required']);
   for (const r of ideas) {
-    csv += csvRow([r.idea_code, r.title, r.status, r.submitter_name, r.department, r.impact_level, r.impact_areas, r.ai_score, r.submitted_at]);
+    csv += csvRow([r.idea_code, r.title, r.status, r.submitter_name, r.department, r.impact_level, r.impact_areas, r.ai_score, r.submitted_at,
+      r.investment_required, r.feasibility, r.implementation_duration, r.expected_implementation_date, r.benefits_expected, r.support_required]);
   }
   return { csv, filename: `ideas_${stamp()}.csv` };
 }

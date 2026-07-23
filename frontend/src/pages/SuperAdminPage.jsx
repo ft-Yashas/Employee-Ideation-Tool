@@ -6,7 +6,7 @@ import { usersApi, ideasApi, scoreApi } from '../services/api';
 import { formatRole, timeAgo, translateStatus, fmtDate } from '../utils/helpers';
 
 const ROLE_COLORS = {
-  admin:'#374151', executive:'#4b5563', senior_manager:'#6b7280',
+  admin:'#374151', executive:'#4b5563', plant_head:'#52525b', senior_manager:'#6b7280', department_manager:'#d97706',
   manager:'#f59e0b', project_lead:'#0891b2', team_lead:'#0284c7',
   employee:'#10b981', trainee:'#64748b',
 };

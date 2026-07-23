@@ -26,6 +26,7 @@ import { masterDb } from '../database/master.js';
 import { getTenantPool } from '../database/tenant.js';
 import { badRequest, notFound, ApiError } from '../utils/respond.js';
 import { assertPasswordStrength } from './authService.js';
+import { STAGE_CATALOG, DEFAULT_STAGES } from './approvalStages.js';
 import logger from '../utils/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -62,7 +63,7 @@ const UPLOADS_BASE = path.join(__dirname, '..', '..', 'uploads');
 const DEFAULTS_WHITELIST = [
   'review_sla_days', 'escalation_days', 'anonymous_allowed', 'public_board_enabled',
   'challenges_enabled', 'approval_mode', 'approval_reviewer_roles',
-  'approval_final_approver_roles', 'approval_threshold',
+  'approval_final_approver_roles', 'approval_threshold', 'approval_stages',
 ];
 
 /** Mirrors settingsService's whitelist — what IFQM may change on a live tenant. */
@@ -71,16 +72,28 @@ const TENANT_SETTINGS_WHITELIST = [
   'challenges_enabled', 'email_enabled', 'smtp_host', 'smtp_port', 'smtp_user',
   'smtp_pass', 'smtp_from', 'smtp_from_name', 'approval_mode',
   'approval_reviewer_roles', 'approval_final_approver_roles', 'approval_threshold',
+  'approval_stages',
 ];
 
 const VALID_CHAIN_ROLES = [
-  'team_lead', 'project_lead', 'manager', 'senior_manager', 'executive', 'admin', 'super_admin',
+  'team_lead', 'project_lead', 'manager', 'department_manager', 'senior_manager',
+  'plant_head', 'executive', 'admin', 'super_admin',
 ];
 
 /** Coerce a settings value the same way the tenant's own settings screen does. */
 function normaliseSetting(key, rawValue) {
   let value = rawValue;
-  if (key === 'approval_mode' && !['default', 'custom'].includes(value)) return null;
+  if (key === 'approval_mode' && !['default', 'custom', 'stages'].includes(value)) return null;
+  if (key === 'approval_stages') {
+    // Same rule as settingsService: unknown stage keys are dropped, the
+    // originator is implicit and first, and a chain with no approver in it is
+    // refused rather than stored.
+    const stages = [...new Set(
+      String(value).split(',').map((s) => s.trim()).filter((s) => STAGE_CATALOG[s] && s !== 'originator')
+    )];
+    if (!stages.length) return null;
+    return ['originator', ...stages].join(',');
+  }
   if (key === 'approval_threshold') {
     return String(Math.max(1, Math.min(100, parseInt(value, 10) || 0)));
   }
@@ -133,6 +146,7 @@ export async function defaultsForNewTenant() {
     ['approval_reviewer_roles', 'team_lead,project_lead,manager,senior_manager'],
     ['approval_final_approver_roles', 'executive,admin,super_admin'],
     ['approval_threshold', '100'],
+    ['approval_stages', DEFAULT_STAGES.join(',')],
   ];
   try {
     const [rows] = await masterDb().query('SELECT key_name, value FROM platform_settings');

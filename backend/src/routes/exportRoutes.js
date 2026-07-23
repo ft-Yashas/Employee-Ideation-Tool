@@ -6,7 +6,7 @@ import { Router } from 'express';
 import * as exp from '../controllers/exportController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
-const ANALYTICS_ROLES = ['admin', 'executive', 'manager', 'senior_manager', 'super_admin'];
+const ANALYTICS_ROLES = ['admin', 'executive', 'manager', 'department_manager', 'senior_manager', 'plant_head', 'super_admin'];
 
 const router = Router();
 

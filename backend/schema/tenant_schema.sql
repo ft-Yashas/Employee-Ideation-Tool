@@ -27,7 +27,10 @@ CREATE TABLE IF NOT EXISTS users (
   department      VARCHAR(100),
   business_unit   VARCHAR(100),
   location        VARCHAR(100),
-  role            ENUM('trainee','employee','team_lead','project_lead','manager','senior_manager','executive','admin','super_admin') NOT NULL DEFAULT 'employee',
+  -- department_manager / plant_head are appended at the END on purpose: an ENUM
+  -- is stored as the ordinal of its member, so a tenant created from this file
+  -- must number its members exactly as migration 003 leaves an upgraded one.
+  role            ENUM('trainee','employee','team_lead','project_lead','manager','senior_manager','executive','admin','super_admin','department_manager','plant_head') NOT NULL DEFAULT 'employee',
   manager_id      INT NULL,
   points          INT NOT NULL DEFAULT 0,
   avatar_initials VARCHAR(4),
@@ -59,6 +62,17 @@ CREATE TABLE IF NOT EXISTS ideas (
   impact_level             ENUM('Low','Medium','High') DEFAULT 'Medium',
   tangible_benefit         TEXT,
   intangible_benefit       TEXT,
+  -- ── business case, captured at submission (from migration 003) ──
+  -- All optional: every idea filed before these existed would otherwise have
+  -- become retrospectively invalid. expected_implementation_date is the
+  -- SUBMITTER's estimate; implementation_target_date below is what the
+  -- implementation owner commits to after approval — deliberately separate.
+  investment_required      VARCHAR(255) NULL DEFAULT NULL,
+  feasibility              ENUM('Low','Medium','High') NULL DEFAULT NULL,
+  implementation_duration  VARCHAR(120) NULL DEFAULT NULL,
+  expected_implementation_date DATE NULL DEFAULT NULL,
+  benefits_expected        TEXT NULL DEFAULT NULL,
+  support_required         TEXT NULL DEFAULT NULL,
   ai_score                 INT DEFAULT 0,
   ai_reason                TEXT,
   workflow_type            ENUM('hierarchical','multi_reviewer') NOT NULL DEFAULT 'hierarchical',
@@ -186,6 +200,25 @@ CREATE TABLE IF NOT EXISTS challenges (
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- ── Idea categories (from migration 003) ─────────────────────────────
+-- Every organisation owns its own list and may add to or delete from it.
+-- ideas.impact_areas still stores the chosen names as comma-separated text, so
+-- deleting a category never rewrites the ideas that were submitted under it.
+CREATE TABLE IF NOT EXISTS idea_categories (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  name       VARCHAR(80) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_idea_category_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO idea_categories (name, sort_order) VALUES
+  ('Safety',       1),
+  ('Quality',      2),
+  ('Productivity', 3),
+  ('Delivery',     4),
+  ('Sustenance',   5);
+
 -- ── Email queue (was schema_updates.sql only) ────────────────────────
 CREATE TABLE IF NOT EXISTS email_queue (
   id         INT AUTO_INCREMENT PRIMARY KEY,
@@ -233,7 +266,10 @@ INSERT IGNORE INTO org_settings (key_name, value) VALUES
   ('approval_mode',             'default'),
   ('approval_reviewer_roles',   'team_lead,project_lead,manager,senior_manager'),
   ('approval_final_approver_roles', 'executive,admin,super_admin'),
-  ('approval_threshold',        '100');
+  ('approval_threshold',        '100'),
+  -- Named approval chain (migration 003). Seeded for every organisation but only
+  -- in force when approval_mode = 'stages'.
+  ('approval_stages',           'originator,immediate_manager,department_manager,plant_head');
 
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id          INT AUTO_INCREMENT PRIMARY KEY,

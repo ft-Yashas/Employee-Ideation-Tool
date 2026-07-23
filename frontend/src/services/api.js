@@ -214,6 +214,17 @@ export const challengesApi = {
   delete: (id) => api.delete(`/challenges/${id}`),
 };
 
+// ── Idea categories (per-organisation) ────────────────────────────
+// `list` is readable by every signed-in user — it is what the submission wizard
+// renders its category chips from. Add/delete are org-admin only and are
+// rejected server-side for anyone else; the tenant is taken from the caller's
+// token, so an admin can only ever edit their own organisation's list.
+export const categoriesApi = {
+  list: () => api.get('/categories'),
+  create: (name) => api.post('/categories', { name }),
+  delete: (id) => api.delete(`/categories/${id}`),
+};
+
 // ── Export ────────────────────────────────────────────────────────
 // These used to build URLs with the JWT in the query string
 // (`?token=<jwt>`), which leaks the credential into browser history, proxy and

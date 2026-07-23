@@ -6,6 +6,7 @@
  * fresh each call (no cross-request/tenant caching), the safe equivalent.
  */
 import { getOrgSettings, sendSmtpEmail } from './mailerService.js';
+import { parseStages, stagesToChain, STAGE_CATALOG } from './approvalStages.js';
 import { badRequest, ApiError } from '../utils/respond.js';
 
 const SETTINGS_WHITELIST = [
@@ -13,7 +14,10 @@ const SETTINGS_WHITELIST = [
   'challenges_enabled', 'email_enabled', 'smtp_host', 'smtp_port', 'smtp_user',
   'smtp_pass', 'smtp_from', 'smtp_from_name', 'approval_mode',
   'approval_reviewer_roles', 'approval_final_approver_roles', 'approval_threshold',
+  'approval_stages',
 ];
+
+const APPROVAL_MODES = ['default', 'custom', 'stages'];
 
 const SMTP_PASS_MASK = '••••••••';
 const isAdmin = (role) => role === 'admin' || role === 'super_admin';
@@ -25,12 +29,37 @@ const DEFAULT_FINAL_ROLES = ['executive', 'admin', 'super_admin'];
 // into the role lists is dropped on save — a bad role name would silently
 // exclude reviewers from the escalation walk.
 const VALID_CHAIN_ROLES = [
-  'team_lead', 'project_lead', 'manager', 'senior_manager', 'executive', 'admin', 'super_admin',
+  'team_lead', 'project_lead', 'manager', 'department_manager', 'senior_manager',
+  'plant_head', 'executive', 'admin', 'super_admin',
 ];
 
 export async function getApprovalConfig(db) {
   const settings = await getOrgSettings(db);
   const mode = settings.approval_mode ?? 'default';
+
+  /*
+   * Stage mode — the organisation described its chain as an ordered list of
+   * named steps (Originator → Immediate Manager → Department Manager → Plant
+   * Head). Everything downstream still consumes reviewer_roles/final_roles, so
+   * the ordering is resolved into those two lists here and the escalation
+   * engine never learns that stages exist.
+   *
+   * A stage list with no approver in it falls through to the built-in chain
+   * rather than leaving submitted ideas with nobody able to action them.
+   */
+  if (mode === 'stages') {
+    const stages = parseStages(settings.approval_stages);
+    const chain = stagesToChain(stages);
+    if (chain) {
+      return {
+        mode: 'stages',
+        stages,
+        reviewer_roles: chain.reviewer_roles,
+        final_roles: chain.final_roles,
+        threshold: clampThreshold(settings.approval_threshold),
+      };
+    }
+  }
 
   if (mode !== 'custom') {
     return {
@@ -47,14 +76,15 @@ export async function getApprovalConfig(db) {
   if (!reviewerRoles.length) reviewerRoles = [...DEFAULT_REVIEWER_ROLES];
   if (!finalRoles.length) finalRoles = [...DEFAULT_FINAL_ROLES];
 
-  const rawThreshold = parseInt(settings.approval_threshold ?? '100', 10) || 100;
   return {
     mode: 'custom',
     reviewer_roles: reviewerRoles,
     final_roles: finalRoles,
-    threshold: Math.max(1, Math.min(100, rawThreshold)),
+    threshold: clampThreshold(settings.approval_threshold),
   };
 }
+
+const clampThreshold = (v) => Math.max(1, Math.min(100, parseInt(v ?? '100', 10) || 100));
 
 // ── GET all settings (with SMTP-password masking) ──────────────────
 export async function getSettings(db, user) {
@@ -98,13 +128,25 @@ export async function updateSettings(db, body) {
     if (key === 'smtp_pass' && (!String(rawValue ?? '').trim() || rawValue === SMTP_PASS_MASK)) continue;
 
     let value = rawValue;
-    if (key === 'approval_mode' && !['default', 'custom'].includes(value)) continue; // reject invalid mode
+    if (key === 'approval_mode' && !APPROVAL_MODES.includes(value)) continue; // reject invalid mode
     if (key === 'approval_threshold') {
       value = String(Math.max(1, Math.min(100, parseInt(value, 10) || 0)));
     }
     if (key === 'approval_reviewer_roles' || key === 'approval_final_approver_roles') {
       value = String(value).split(',').map((s) => s.trim())
         .filter((r) => VALID_CHAIN_ROLES.includes(r)).join(',');
+    }
+    /*
+     * Stage keys are validated against the catalog for the same reason the role
+     * lists are: a stage nobody holds is a step no idea can ever pass, and it
+     * would only be discovered by an employee whose submission stopped moving.
+     * An unrecognised key is dropped rather than stored.
+     */
+    if (key === 'approval_stages') {
+      const stages = String(value).split(',').map((s) => s.trim()).filter((s) => STAGE_CATALOG[s]);
+      const approvers = [...new Set(stages.filter((s) => s !== 'originator'))];
+      if (!approvers.length) throw badRequest('The approval chain needs at least one approver stage.');
+      value = ['originator', ...approvers].join(',');
     }
 
     await db.execute(

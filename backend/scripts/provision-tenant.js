@@ -136,6 +136,7 @@ async function main() {
       ['approval_reviewer_roles', 'team_lead,project_lead,manager,senior_manager'],
       ['approval_final_approver_roles', 'executive,admin,super_admin'],
       ['approval_threshold', '100'],
+      ['approval_stages', 'originator,immediate_manager,department_manager,plant_head'],
     ];
     for (const [k, v] of defaults) {
       await tenantConn.execute('INSERT INTO org_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=value', [k, v]);

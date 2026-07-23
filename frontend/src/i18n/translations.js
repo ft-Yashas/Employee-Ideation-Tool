@@ -31,11 +31,18 @@ export const IMPACT_KEYS = {
   'Low':'impact.low', 'Medium':'impact.medium',
   'High':'impact.high', 'Critical':'impact.critical',
 };
+// Organisations now own their own category list, so this map cannot be
+// exhaustive — it covers the seeded defaults plus the seven areas that shipped
+// hard-coded before them, so existing ideas keep translating. A category an org
+// invented has no key and renders as typed, in every language.
 export const AREA_KEYS = {
+  'Safety':'area.safety',
+  'Quality':'area.quality',
+  'Productivity':'area.productivity',
+  'Delivery':'area.delivery',
+  'Sustenance':'area.sustenance',
   'Cost Reduction':'area.cost_reduction',
   'Quality Improvement':'area.quality_improvement',
-  'Safety':'area.safety',
-  'Productivity':'area.productivity',
   'Customer Satisfaction':'area.customer_satisfaction',
   'Process Efficiency':'area.process_efficiency',
   'Innovation':'area.innovation',
@@ -43,7 +50,9 @@ export const AREA_KEYS = {
 export const ROLE_KEYS = {
   trainee:'role.trainee', employee:'role.employee', team_lead:'role.team_lead',
   project_lead:'role.project_lead', manager:'role.manager',
-  senior_manager:'role.senior_manager', executive:'role.executive',
+  department_manager:'role.department_manager',
+  senior_manager:'role.senior_manager', plant_head:'role.plant_head',
+  executive:'role.executive',
   admin:'role.admin', super_admin:'role.super_admin', platform_admin:'role.platform_admin',
 };
 

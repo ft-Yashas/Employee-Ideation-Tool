@@ -8,7 +8,7 @@ import { requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
-router.get('/analytics', requireRole('admin', 'executive', 'manager', 'senior_manager', 'super_admin'), reports.analytics);
-router.get('/audit', requireRole('admin', 'manager', 'senior_manager', 'executive', 'super_admin'), reports.audit);
+router.get('/analytics', requireRole('admin', 'executive', 'manager', 'department_manager', 'senior_manager', 'plant_head', 'super_admin'), reports.analytics);
+router.get('/audit', requireRole('admin', 'manager', 'department_manager', 'senior_manager', 'plant_head', 'executive', 'super_admin'), reports.audit);
 
 export default router;

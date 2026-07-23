@@ -52,7 +52,7 @@ function safeTenant(t) {
 }
 
 /** Order-by-role FIELD() fragment shared across tenant user queries. */
-const ROLE_ORDER = "FIELD(u.role,'admin','executive','senior_manager','manager','project_lead','team_lead','employee','trainee')";
+const ROLE_ORDER = "FIELD(u.role,'admin','executive','plant_head','senior_manager','department_manager','manager','project_lead','team_lead','employee','trainee')";
 
 // ── GET tenants (aggregate stats only) ─────────────────────────────
 export async function tenants() {

@@ -3,12 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import { useLang } from '../context/LangContext';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
-import { ideasApi, challengesApi, uploadApi, usersApi } from '../services/api';
+import { ideasApi, challengesApi, uploadApi, usersApi, categoriesApi } from '../services/api';
 import { translateStatus, translateImpact, translateArea } from '../utils/helpers';
 
-const TOTAL_STEPS = 5;
-const IMPACT_AREAS = ['Cost Reduction','Quality Improvement','Safety','Productivity','Customer Satisfaction','Process Efficiency','Innovation'];
 const IMPACT_LEVELS = ['Low','Medium','High','Critical'];
+const FEASIBILITY_LEVELS = ['Low','Medium','High'];
+
+/*
+ * Categories are per-organisation rows now, not a constant compiled into this
+ * bundle. This list is only the last resort: if the request fails the employee
+ * still gets a usable form instead of a step with nothing on it. It mirrors the
+ * seed in migration 003.
+ */
+const FALLBACK_CATEGORIES = ['Safety','Quality','Productivity','Delivery','Sustenance'];
 
 export default function SubmitPage() {
   const { user }      = useAuth();
@@ -30,12 +37,21 @@ export default function SubmitPage() {
   const [intangible,  setIntangible]  = useState('');
   const [impactAreas, setImpactAreas] = useState([]);
   const [impactLevel, setImpactLevel] = useState('Medium');
+  const [categories,  setCategories]  = useState(FALLBACK_CATEGORIES);
 
-  // Step 3 files
+  // Step 3 business case
+  const [investment,   setInvestment]   = useState('');
+  const [feasibility,  setFeasibility]  = useState('');
+  const [implDuration, setImplDuration] = useState('');
+  const [implDate,     setImplDate]     = useState('');
+  const [benefits,     setBenefits]     = useState('');
+  const [support,      setSupport]      = useState('');
+
+  // Step 4 files
   const [fileSit, setFileSit] = useState(null);
   const [fileSol, setFileSol] = useState(null);
 
-  // Step 4 co-suggesters
+  // Step 5 co-suggesters
   const [co1Id, setCo1Id] = useState('');
   const [co1Name, setCo1Name] = useState('');
   const [co2Id, setCo2Id] = useState('');
@@ -45,7 +61,7 @@ export default function SubmitPage() {
   const [co1Results, setCo1Results] = useState([]);
   const [co2Results, setCo2Results] = useState([]);
 
-  // Step 5 options
+  // Step 6 options
   const [anonymous,    setAnonymous]    = useState(false);
   const [templateType, setTemplateType] = useState('');
   const [challengeId,  setChallengeId]  = useState('');
@@ -56,12 +72,23 @@ export default function SubmitPage() {
   const dupTimerRef = useRef(null);
   const searchTimers = useRef({});
 
-  useEffect(() => { loadChallenges(); }, []);
+  useEffect(() => { loadChallenges(); loadCategories(); }, []);
 
   async function loadChallenges() {
     try {
       const res = await challengesApi.list();
       if (res.data.success) setChallenges(res.data.challenges?.filter(c => c.status==='active') || []);
+    } catch {}
+  }
+
+  // An organisation that has deleted every category cannot happen (the API
+  // refuses the last delete), but an empty response still falls back rather
+  // than rendering a step with no choices on it.
+  async function loadCategories() {
+    try {
+      const res = await categoriesApi.list();
+      const names = (res.data.categories || []).map(c => c.name).filter(Boolean);
+      if (names.length) setCategories(names);
     } catch {}
   }
 
@@ -119,6 +146,13 @@ export default function SubmitPage() {
       impact_level:       impactLevel,
       tangible_benefit:   tangible,
       intangible_benefit: intangible,
+      // Business case — all optional; blanks are stored as NULL server-side.
+      investment_required:          investment,
+      feasibility:                  feasibility,
+      implementation_duration:      implDuration,
+      expected_implementation_date: implDate,
+      benefits_expected:            benefits,
+      support_required:             support,
       co_suggester_1_id:  co1Id || null,
       co_suggester_2_id:  co2Id || null,
       is_anonymous:       anonymous ? 1 : 0,
@@ -176,15 +210,26 @@ export default function SubmitPage() {
   function resetForm() {
     setTitle(''); setSituation(''); setSolution(''); setTangible(''); setIntangible('');
     setImpactAreas([]); setImpactLevel('Medium'); setFileSit(null); setFileSol(null);
+    setInvestment(''); setFeasibility(''); setImplDuration(''); setImplDate('');
+    setBenefits(''); setSupport('');
     setCo1Id(''); setCo1Name(''); setCo2Id(''); setCo2Name('');
     setCo1Query(''); setCo2Query('');
     setAnonymous(false); setTemplateType(''); setChallengeId('');
     setDraftId(null); setStep(1); setError(''); setDupWarning([]);
   }
 
+  /*
+   * The business case is a step of its own, third, straight after the solution
+   * — the questions it asks (what will this cost, how long, what support) only
+   * make sense once the solution has been described, and they belong before the
+   * optional attachment/co-suggester steps rather than buried under them.
+   *
+   * The existing wizard.stepN keys keep their original meanings; the new step
+   * has its own key rather than shifting every label by one.
+   */
   const stepLabels = [
-    t('wizard.step1'), t('wizard.step2'), t('wizard.step3'),
-    t('wizard.step4'), t('wizard.step5'),
+    t('wizard.step1'), t('wizard.step2'), t('wizard.business'),
+    t('wizard.step3'), t('wizard.step4'), t('wizard.step5'),
   ];
 
   return (
@@ -256,7 +301,7 @@ export default function SubmitPage() {
             <div className="form-group">
               <label>{t('form.impact_areas')}</label>
               <div style={{ display:'flex',flexWrap:'wrap',gap:8,marginTop:4 }}>
-                {IMPACT_AREAS.map(a => (
+                {categories.map(a => (
                   <div key={a} className={`impact-chip${impactAreas.includes(a)?' selected':''}`}
                     data-val={a} onClick={() => toggleImpact(a)}>{translateArea(a, t)}</div>
                 ))}
@@ -271,8 +316,65 @@ export default function SubmitPage() {
           </div>
         )}
 
-        {/* Step 3: Attachments */}
+        {/* Step 3: Business Case */}
         {step === 3 && (
+          <div style={{ animation:'fadeInUp .25s cubic-bezier(.4,0,.2,1)' }}>
+            <div style={{ marginBottom:4,fontSize:13,fontWeight:600,color:'var(--heading)' }}>{t('form.bc_heading')}</div>
+            <div style={{ marginBottom:16,fontSize:12,color:'var(--subtle)' }}>{t('form.bc_hint')}</div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>{t('form.investment')}</label>
+                <input className="form-control" value={investment} maxLength={255}
+                  onChange={e => setInvestment(e.target.value)}
+                  placeholder={t('form.investment_ph')} />
+              </div>
+              <div className="form-group">
+                <label>{t('form.feasibility')}</label>
+                <select className="form-control" value={feasibility} onChange={e => setFeasibility(e.target.value)}>
+                  <option value="">{t('form.feas_none')}</option>
+                  {FEASIBILITY_LEVELS.map(l => <option key={l} value={l}>{translateImpact(l, t)}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* "date or duration" — either answer is valid, so both are offered
+                and neither is required. */}
+            <div className="form-group">
+              <label>{t('form.impl_time')}</label>
+              <div className="form-row" style={{ marginTop:4 }}>
+                <div className="form-group" style={{ marginBottom:0 }}>
+                  <input className="form-control" value={implDuration} maxLength={120}
+                    onChange={e => setImplDuration(e.target.value)}
+                    placeholder={t('form.impl_duration_ph')} aria-label={t('form.impl_duration')} />
+                </div>
+                <div className="form-group" style={{ marginBottom:0 }}>
+                  <input className="form-control" type="date" value={implDate}
+                    onChange={e => setImplDate(e.target.value)} aria-label={t('form.impl_date')} />
+                </div>
+              </div>
+              <div style={{ fontSize:11,color:'var(--subtle)',marginTop:4 }}>
+                {t('form.impl_duration')} · {t('form.impl_date')}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>{t('form.benefits')}</label>
+              <textarea className="form-control" rows="3" value={benefits}
+                onChange={e => setBenefits(e.target.value)}
+                placeholder={t('form.benefits_ph')} />
+            </div>
+            <div className="form-group">
+              <label>{t('form.support')}</label>
+              <textarea className="form-control" rows="3" value={support}
+                onChange={e => setSupport(e.target.value)}
+                placeholder={t('form.support_ph')} />
+            </div>
+          </div>
+        )}
+
+        {/* Step 4: Attachments */}
+        {step === 4 && (
           <div style={{ animation:'fadeInUp .25s cubic-bezier(.4,0,.2,1)' }}>
             <div className="form-group">
               <label>{t('form.attach_situation')}</label>
@@ -291,7 +393,7 @@ export default function SubmitPage() {
         )}
 
         {/* Step 4: Co-Suggesters */}
-        {step === 4 && (
+        {step === 5 && (
           <div style={{ animation:'fadeInUp .25s cubic-bezier(.4,0,.2,1)' }}>
             <div className="form-group">
               <label>{t('form.co1')}</label>
@@ -335,7 +437,7 @@ export default function SubmitPage() {
         )}
 
         {/* Step 5: Review & Submit */}
-        {step === 5 && (
+        {step === 6 && (
           <div style={{ animation:'fadeInUp .25s cubic-bezier(.4,0,.2,1)' }}>
             <div style={{ marginBottom:16,fontSize:13,fontWeight:600,color:'var(--heading)' }}>{t('form.review_heading')}</div>
 
@@ -363,6 +465,20 @@ export default function SubmitPage() {
                 <div className="form-control" style={{ background:'var(--panel-bg)' }}>{translateImpact(impactLevel, t)}</div>
               </div>
             </div>
+            {/* Business case — only the answers that were actually given, so a
+                lightly-filled form does not review as a wall of blanks. */}
+            {[[t('form.investment'), investment],
+              [t('form.feasibility'), feasibility ? translateImpact(feasibility, t) : ''],
+              [t('form.impl_time'), [implDuration, implDate].filter(Boolean).join(' · ')],
+              [t('form.benefits'), benefits],
+              [t('form.support'), support],
+            ].filter(([, v]) => v).map(([label, v]) => (
+              <div className="form-group" key={label}>
+                <label>{label}</label>
+                <div className="form-control" style={{ background:'var(--panel-bg)',height:'auto',minHeight:38 }}>{v}</div>
+              </div>
+            ))}
+
             {co1Name && (
               <div className="form-group">
                 <label>{t('preview.co_suggesters')}</label>
@@ -409,18 +525,18 @@ export default function SubmitPage() {
         )}
 
         {/* Navigation */}
-        {step < 5 && (
+        {step < 6 && (
           <div id="wizard-nav" style={{ display:'flex',justifyContent:'space-between',marginTop:24 }}>
             <button className="btn btn-outline" style={{ visibility:step>1?'visible':'hidden' }} onClick={() => goStep(step-1)}>
               ← {t('btn.back')}
             </button>
             <button className="btn btn-primary" onClick={() => goStep(step+1)}>
-              {step === 4 ? t('btn.review') : t('btn.next')} →
+              {step === 5 ? t('btn.review') : t('btn.next')} →
             </button>
           </div>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div style={{ marginTop:12 }}>
             <button className="btn btn-outline btn-sm" onClick={() => goStep(step-1)}>← {t('btn.back')}</button>
           </div>

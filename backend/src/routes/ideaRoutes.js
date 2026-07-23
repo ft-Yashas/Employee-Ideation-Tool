@@ -9,8 +9,8 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
-const REVIEWER_ROLES = ['team_lead', 'project_lead', 'manager', 'senior_manager', 'executive', 'admin', 'super_admin'];
-const IMPL_ROLES = ['manager', 'senior_manager', 'executive', 'admin', 'super_admin'];
+const REVIEWER_ROLES = ['team_lead', 'project_lead', 'manager', 'department_manager', 'senior_manager', 'plant_head', 'executive', 'admin', 'super_admin'];
+const IMPL_ROLES = ['manager', 'department_manager', 'senior_manager', 'plant_head', 'executive', 'admin', 'super_admin'];
 
 // Reads — literal paths before the /:id param route.
 router.get('/', requireAuth, ideas.list);                       // action=list

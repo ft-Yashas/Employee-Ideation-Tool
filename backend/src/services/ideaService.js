@@ -27,9 +27,12 @@ import { badRequest, forbidden, notFound, ApiError } from '../utils/respond.js';
 const POINTS = config.points;
 
 const INDIVIDUAL_ROLES = ['trainee', 'employee'];
-const TEAM_ROLES = ['team_lead', 'project_lead', 'manager', 'senior_manager'];
-const ADMIN_ROLES = ['executive', 'admin', 'super_admin'];
-const PRIVILEGED_ANON = ['manager', 'senior_manager', 'executive', 'admin', 'super_admin'];
+// department_manager sits with the other line roles: it sees its own reports'
+// ideas. plant_head is org-wide, so it sits with the admin set and sees all of
+// them — the same split executive already had.
+const TEAM_ROLES = ['team_lead', 'project_lead', 'manager', 'department_manager', 'senior_manager'];
+const ADMIN_ROLES = ['plant_head', 'executive', 'admin', 'super_admin'];
+const PRIVILEGED_ANON = ['manager', 'department_manager', 'senior_manager', 'plant_head', 'executive', 'admin', 'super_admin'];
 
 // ── LIST ────────────────────────────────────────────────────────────
 export async function list(db, user, { status, search, impact } = {}) {
@@ -220,6 +223,23 @@ export async function submitOrDraft(db, user, action, b) {
   const challengeId = b.challenge_id ? Number(b.challenge_id) : null;
   const templateType = String(b.template_type ?? '').trim() || null;
 
+  /*
+   * Business case. Every field is optional — a half-formed idea is still worth
+   * capturing, and the reviewer can ask for the rest. Blank stays NULL rather
+   * than becoming an empty string so "not answered" is distinguishable from
+   * "answered with nothing" on the detail screen and in exports.
+   */
+  const investment = String(b.investment_required ?? '').trim().slice(0, 255) || null;
+  const feasibilityIn = String(b.feasibility ?? '').trim();
+  const feasibility = ['Low', 'Medium', 'High'].includes(feasibilityIn) ? feasibilityIn : null;
+  const implDuration = String(b.implementation_duration ?? '').trim().slice(0, 120) || null;
+  // A malformed date would be written as 0000-00-00 (or rejected outright in
+  // strict mode); anything that is not a plain YYYY-MM-DD is simply not a date.
+  const expectedDateIn = String(b.expected_implementation_date ?? '').trim();
+  const expectedDate = /^\d{4}-\d{2}-\d{2}$/.test(expectedDateIn) ? expectedDateIn : null;
+  const benefitsExpected = String(b.benefits_expected ?? '').trim() || null;
+  const supportRequired = String(b.support_required ?? '').trim() || null;
+
   if (!title || !sit || !sol) {
     throw badRequest('Title, present situation and proposed solution are required.');
   }
@@ -263,6 +283,8 @@ export async function submitOrDraft(db, user, action, b) {
       `UPDATE ideas SET
         title=?,present_situation=?,proposed_solution=?,
         impact_areas=?,impact_level=?,tangible_benefit=?,intangible_benefit=?,
+        investment_required=?,feasibility=?,implementation_duration=?,
+        expected_implementation_date=?,benefits_expected=?,support_required=?,
         co_suggester_1_id=?,co_suggester_2_id=?,
         is_anonymous=?,challenge_id=?,template_type=?,
         status=?,submitted_at=COALESCE(submitted_at,?),
@@ -272,6 +294,7 @@ export async function submitOrDraft(db, user, action, b) {
         updated_at=NOW()
        WHERE id=? AND submitter_id=?`,
       [title, sit, sol, impacts, impLvl, tangible, intang,
+        investment, feasibility, implDuration, expectedDate, benefitsExpected, supportRequired,
         co1, co2, isAnon, challengeId, templateType,
         status, submittedAt, reviewDueDate, currentReviewerId,
         aiScore, aiReason,
@@ -284,11 +307,14 @@ export async function submitOrDraft(db, user, action, b) {
       `INSERT INTO ideas (
           idea_code,title,present_situation,proposed_solution,
           impact_areas,impact_level,tangible_benefit,intangible_benefit,
+          investment_required,feasibility,implementation_duration,
+          expected_implementation_date,benefits_expected,support_required,
           co_suggester_1_id,co_suggester_2_id,is_anonymous,challenge_id,template_type,
           status,submitter_id,submitted_at,review_due_date,current_reviewer_id,
           ai_score,ai_reason)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [code, title, sit, sol, impacts, impLvl, tangible, intang,
+        investment, feasibility, implDuration, expectedDate, benefitsExpected, supportRequired,
         co1, co2, isAnon, challengeId, templateType,
         status, user.id, submittedAt, reviewDueDate, currentReviewerId,
         aiScore, aiReason]

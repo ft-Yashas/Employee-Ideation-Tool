@@ -16,7 +16,7 @@
 import { badRequest, forbidden, notFound } from '../utils/respond.js';
 
 const num = (v) => Number(v ?? 0);
-const PRIVILEGED_ANON = ['manager', 'senior_manager', 'executive', 'admin', 'super_admin'];
+const PRIVILEGED_ANON = ['manager', 'department_manager', 'senior_manager', 'plant_head', 'executive', 'admin', 'super_admin'];
 const VOTABLE_STATUSES = ['Submitted', 'Under Review', 'Approved', 'Implemented'];
 
 // ── Shared stat helpers (mirror the PHP functions) ─────────────────
